@@ -145,7 +145,7 @@ function main()
     minΔz = min_node_distance(grid_3D, VerticalDirection())
 
     #- 2 horiz directions
-    gravity_max_dT = 1 / (2√(gravity * H) / minΔx)
+    gravity_max_dT = 1 / (2 * √(gravity * H) / minΔx)
     dt_fast = minimum([gravity_max_dT])
 
     #- 2 horiz directions + harmonic visc or diffusion: 2^2 factor in CFL:

@@ -25,3 +25,6 @@ docs/site/
 *.jld2
 *.vtk
 
+# Script-specific output
+vtk_split
+
