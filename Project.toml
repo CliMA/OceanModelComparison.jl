@@ -2,3 +2,13 @@ name = "OceanModelComparison"
 uuid = "fab7c871-2889-49f3-bd11-80737ca0f445"
 authors = ["ali-ramadhan <ali.hh.ramadhan@gmail.com>"]
 version = "0.1.0"
+
+[deps]
+CLIMAParameters = "6eacf6c3-8458-43b9-ae03-caf5306d3d53"
+ClimateMachine = "777c4786-024f-11e9-21a3-85d5d4106250"
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
+MPI = "da04e1cc-30fd-572f-bb4f-1f8673147195"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
