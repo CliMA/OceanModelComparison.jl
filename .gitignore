@@ -17,3 +17,11 @@ deps/src/
 docs/build/
 docs/site/
 
+# Temporary and intermediate files
+*.swp
+
+# Output
+*.nc
+*.jld2
+*.vtk
+
