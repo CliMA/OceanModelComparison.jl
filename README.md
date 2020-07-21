@@ -1,2 +1,2 @@
 # OceanModelComparison.jl
-Comparing different ocean models: CliMA-Ocean (discontinuous Galerkin), Oceananigans.jl, and MITgcm (finite volume).
+Comparing different ocean models: OceanMachine.jl (discontinuous Galerkin), Oceananigans.jl, and MITgcm (both finite volume).
