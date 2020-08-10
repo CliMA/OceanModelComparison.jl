@@ -5,6 +5,7 @@ using LinearAlgebra
 
 using MPI
 using StaticArrays
+using NCDatasets
 
 using ClimateMachine
 ClimateMachine.init(parse_clargs = true)
@@ -130,40 +131,47 @@ function make_callbacks(step, nout, mpicomm, odesolver, dg_slow, model_slow, Q_s
     ΣNᶻ = (Np+1)*Nᶻ
 
     gnd = reshape(dg_slow.grid.vgeo, (Np+1, Np+1, Np+1, 16, Nˣ, Nʸ, Nᶻ))
-    xs = gnd[:, :, :, 13, :, :, :] |> Array
-    ys = gnd[:, :, :, 14, :, :, :] |> Array
-    zs = gnd[:, :, :, 15, :, :, :] |> Array
+    x = gnd[:, :, :, 13, :, :, :] |> Array
+    y = gnd[:, :, :, 14, :, :, :] |> Array
+    z = gnd[:, :, :, 15, :, :, :] |> Array
 
-    ΔX = (maximum(xs) - minimum(xs)) / Nˣ
-    ΔY = (maximum(ys) - minimum(ys)) / Nʸ
-    ΔZ = (maximum(zs) - minimum(zs)) / Nᶻ
+    ΔX = (maximum(x) - minimum(x)) / Nˣ
+    ΔY = (maximum(y) - minimum(y)) / Nʸ
+    ΔZ = (maximum(z) - minimum(z)) / Nᶻ
 
     ds = NCDataset("simple_box_ivd.nc", "c")
 
     defDim(ds, "time", Inf)
+    defVar(ds, "time", Float64, ("time",))
+
     defDim(ds, "x", ΣNˣ)
     defDim(ds, "y", ΣNʸ)
     defDim(ds, "z", ΣNᶻ)
     
-    defVar(ds, "x_nodal", xs, ("x", "y", "z"))
-    defVar(ds, "y_nodal", ys, ("x", "y", "z"))
-    defVar(ds, "z_nodal", zs, ("x", "y", "z"))
+    defVar(ds, "x_nodal", Float64, ("x", "y", "z"))
+    defVar(ds, "y_nodal", Float64, ("x", "y", "z"))
+    defVar(ds, "z_nodal", Float64, ("x", "y", "z"))
 
     defVar(ds, "u", Float64, ("x", "y", "z", "time"))
     defVar(ds, "v", Float64, ("x", "y", "z", "time"))
     defVar(ds, "η", Float64, ("x", "y", "z", "time"))
     defVar(ds, "θ", Float64, ("x", "y", "z", "time"))
 
-    netcdf_output = GenericCallbacks.EveryXSimulationSteps(nout) do (init = false)
-        Q3nd = reshape(Q_slow.realdata, (Np+1, Np+1, Np+1, 4, Nˣ, Nʸ, Nᶻ))
+    netcdf_output = GenericCallbacks.EveryXSimulationSteps(1) do (init = false)
+	time_index = length(ds["time"]) + 1
+
+	if time_index == 1
+	    xs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+            ys = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+            zs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+	end
+
+	Q3nd = reshape(Q_slow.realdata, (Np+1, Np+1, Np+1, 4, Nˣ, Nʸ, Nᶻ))
         u = Q3nd[:, :, :, 1, :, :, :] |> Array
         v = Q3nd[:, :, :, 2, :, :, :] |> Array
         η = Q3nd[:, :, :, 3, :, :, :] |> Array
         θ = Q3nd[:, :, :, 4, :, :, :] |> Array
 
-        xs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
-        ys = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
-        zs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
         us = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
         vs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
         ηs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
@@ -181,17 +189,30 @@ function make_callbacks(step, nout, mpicomm, odesolver, dg_slow, model_slow, Q_s
             j_elem = (J′-1) * Nᵖ⁺¹ + 1 : J′ * Nᵖ⁺¹
             k_elem = (K′-1) * Nᵖ⁺¹ + 1 : K′ * Nᵖ⁺¹
 
+	    if time_index == 1
+		xs[i_elem, j_elem, k_elem] .= x[:, :, :, I, J, K]
+		ys[i_elem, j_elem, k_elem] .= y[:, :, :, I, J, K]
+		zs[i_elem, j_elem, k_elem] .= z[:, :, :, I, J, K]
+	    end
+
             us[i_elem, j_elem, k_elem] .= u[:, :, :, I, J, K]
             vs[i_elem, j_elem, k_elem] .= v[:, :, :, I, J, K]
             ηs[i_elem, j_elem, k_elem] .= η[:, :, :, I, J, K]
             θs[i_elem, j_elem, k_elem] .= θ[:, :, :, I, J, K]
+	end
 
-            time_index = length(ds["time"]) + 1
-            ds["u"][:, :, :, time_index] = us
-            ds["v"][:, :, :, time_index] = vs
-            ds["η"][:, :, :, time_index] = ηs
-            ds["θ"][:, :, :, time_index] = θs
-        end
+	if time_index == 1
+	    ds["x_nodal"][:, :, :] = xs
+	    ds["y_nodal"][:, :, :] = ys
+	    ds["z_nodal"][:, :, :] = zs
+	end
+
+        ds["u"][:, :, :, time_index] = us
+        ds["v"][:, :, :, time_index] = vs
+        ds["η"][:, :, :, time_index] = ηs
+        ds["θ"][:, :, :, time_index] = θs
+
+	sync(ds)
     end
 
     starttime = Ref(now())
