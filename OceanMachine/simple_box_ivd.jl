@@ -121,35 +121,77 @@ function ocean_init_aux!(m::BarotropicModel, P::SimpleBox, A, geom)
     return nothing
 end
 
-function make_callbacks(vtkpath, step, nout, mpicomm, odesolver, dg_slow, model_slow, Q_slow, dg_fast, model_fast, Q_fast)
-    if isdir(vtkpath)
-        rm(vtkpath, recursive = true)
-    end
+function make_callbacks(step, nout, mpicomm, odesolver, dg_slow, model_slow, Q_slow, dg_fast, model_fast, Q_fast)
+    Np = N
+    Nᵖ⁺¹ = Np + 1
 
-    mkpath(vtkpath)
-    mkpath(vtkpath * "/slow")
-    mkpath(vtkpath * "/fast")
+    ΣNˣ = (Np+1)*Nˣ
+    ΣNʸ = (Np+1)*Nʸ
+    ΣNᶻ = (Np+1)*Nᶻ
 
-    function do_output(span, step, model, dg, Q)
-        outprefix = @sprintf("%s/%s/mpirank%04d_step%04d", vtkpath, span, MPI.Comm_rank(mpicomm), step)
-        @info "doing VTK output" outprefix
-        statenames = flattenednames(vars_state_conservative(model, eltype(Q)))
-        auxnames = flattenednames(vars_state_auxiliary(model, eltype(Q)))
-        writevtk(outprefix, Q, dg, statenames, dg.state_auxiliary, auxnames)
-    end
+    gnd = reshape(dg_slow.grid.vgeo, (Np+1, Np+1, Np+1, 16, Nˣ, Nʸ, Nᶻ))
+    xs = gnd[:, :, :, 13, :, :, :] |> Array
+    ys = gnd[:, :, :, 14, :, :, :] |> Array
+    zs = gnd[:, :, :, 15, :, :, :] |> Array
 
-    do_output("slow", step[1], model_slow, dg_slow, Q_slow)
-    cbvtk_slow = GenericCallbacks.EveryXSimulationSteps(nout) do (init = false)
-        do_output("slow", step[1], model_slow, dg_slow, Q_slow)
-        step[1] += 1
-        nothing
-    end
+    ΔX = (maximum(xs) - minimum(xs)) / Nˣ
+    ΔY = (maximum(ys) - minimum(ys)) / Nʸ
+    ΔZ = (maximum(zs) - minimum(zs)) / Nᶻ
 
-    do_output("fast", step[2], model_fast, dg_fast, Q_fast)
-    cbvtk_fast = GenericCallbacks.EveryXSimulationSteps(nout) do (init = false)
-        do_output("fast", step[2], model_fast, dg_fast, Q_fast)
-        step[2] += 1
-        nothing
+    ds = NCDataset("simple_box_ivd.nc", "c")
+
+    defDim(ds, "time", Inf)
+    defDim(ds, "x", ΣNˣ)
+    defDim(ds, "y", ΣNʸ)
+    defDim(ds, "z", ΣNᶻ)
+    
+    defVar(ds, "x_nodal", xs, ("x", "y", "z"))
+    defVar(ds, "y_nodal", ys, ("x", "y", "z"))
+    defVar(ds, "z_nodal", zs, ("x", "y", "z"))
+
+    defVar(ds, "u", Float64, ("x", "y", "z", "time"))
+    defVar(ds, "v", Float64, ("x", "y", "z", "time"))
+    defVar(ds, "η", Float64, ("x", "y", "z", "time"))
+    defVar(ds, "θ", Float64, ("x", "y", "z", "time"))
+
+    netcdf_output = GenericCallbacks.EveryXSimulationSteps(nout) do (init = false)
+        Q3nd = reshape(Q_slow.realdata, (Np+1, Np+1, Np+1, 4, Nˣ, Nʸ, Nᶻ))
+        u = Q3nd[:, :, :, 1, :, :, :] |> Array
+        v = Q3nd[:, :, :, 2, :, :, :] |> Array
+        η = Q3nd[:, :, :, 3, :, :, :] |> Array
+        θ = Q3nd[:, :, :, 4, :, :, :] |> Array
+
+        xs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+        ys = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+        zs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+        us = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+        vs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+        ηs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+        θs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+
+        for I in 1:Nˣ, J in 1:Nʸ, K in 1:Nᶻ
+            I′ = x[:, :, :, I, J, K] ./ ΔX |> maximum |> round |> Int
+            J′ = y[:, :, :, I, J, K] ./ ΔY |> maximum |> round |> Int
+            K′ = z[:, :, :, I, J, K] ./ ΔZ |> maximum |> round |> Int
+            K′ = Nᶻ + K′
+            
+            @debug "($I, $J, $K) -> ($I′, $J′, $(Nᶻ+K′))"
+
+            i_elem = (I′-1) * Nᵖ⁺¹ + 1 : I′ * Nᵖ⁺¹
+            j_elem = (J′-1) * Nᵖ⁺¹ + 1 : J′ * Nᵖ⁺¹
+            k_elem = (K′-1) * Nᵖ⁺¹ + 1 : K′ * Nᵖ⁺¹
+
+            us[i_elem, j_elem, k_elem] .= u[:, :, :, I, J, K]
+            vs[i_elem, j_elem, k_elem] .= v[:, :, :, I, J, K]
+            ηs[i_elem, j_elem, k_elem] .= η[:, :, :, I, J, K]
+            θs[i_elem, j_elem, k_elem] .= θ[:, :, :, I, J, K]
+
+            time_index = length(ds["time"]) + 1
+            ds["u"][:, :, :, time_index] = us
+            ds["v"][:, :, :, time_index] = vs
+            ds["η"][:, :, :, time_index] = ηs
+            ds["θ"][:, :, :, time_index] = θs
+        end
     end
 
     starttime = Ref(now())
@@ -172,14 +214,13 @@ function make_callbacks(vtkpath, step, nout, mpicomm, odesolver, dg_slow, model_
         end
     end
 
-    return (cbvtk_slow, cbvtk_fast, cbinfo)
+    return (netcdf_output, cbinfo)
 end
 
 #################
 # RUN THE TESTS #
 #################
 FT = Float64
-vtkpath = "vtk_split"
 
 const timeend = 5 * 24 * 3600 # s
 const tout = 24 * 3600 # s
@@ -312,7 +353,7 @@ const θᴱ = 10    # deg.C
             ntFreq; prec=12)
 
     step = [0, 0]
-    cbvector = make_callbacks(vtkpath, step, nout, mpicomm, odesolver, dg, model, Q_3D,
+    cbvector = make_callbacks(step, nout, mpicomm, odesolver, dg, model, Q_3D,
 			      barotropic_dg, barotropicmodel, Q_2D)
 
     eng0 = norm(Q_3D)
@@ -351,130 +392,4 @@ const θᴱ = 10    # deg.C
         checkPass ? checkRep = "Pass" : checkRep = "Fail"
         @info @sprintf("""Compare vs RefVals: %s""", checkRep )
     end
-
-Np = N
-Nᵖ⁺¹ = Np + 1
-
-gnd = reshape(dg.grid.vgeo, (Np+1, Np+1, Np+1, 16, Nˣ, Nʸ, Nᶻ))
-xs = gnd[:, :, :, 13, :, :, :] |> Array
-ys = gnd[:, :, :, 14, :, :, :] |> Array
-zs = gnd[:, :, :, 15, :, :, :] |> Array
-
-Q3nd = reshape(Q_3D.realdata, (Np+1, Np+1, Np+1, 4, Nˣ, Nʸ, Nᶻ))
-u = Q3nd[:, :, :, 1, :, :, :] |> Array
-v = Q3nd[:, :, :, 2, :, :, :] |> Array
-η = Q3nd[:, :, :, 3, :, :, :] |> Array
-θ = Q3nd[:, :, :, 4, :, :, :] |> Array
-
-Q2nd = reshape(Q_2D.realdata, (Np+1, Np+1, 3, Nˣ, Nʸ))
-U = Q2nd[:, :, 1, :, :] |> Array
-V = Q2nd[:, :, 2, :, :] |> Array
-Η = Q2nd[:, :, 3, :, :] |> Array
-
-function dedup(x, ε=1e-2)
-    # x must be sorted before this
-    for i=2:length(x)
-	if abs(x[i] - x[i-1]) < ε
-            x[i] = x[i-1]
-        end
-    end
-    return unique(x)
-end
-
-xs = dedup(sort(unique(xs)))
-ys = dedup(sort(unique(ys)))
-zs = dedup(sort(unique(zs)))
-
-@assert length(xs) == Np * Nˣ + 1
-@assert length(ys) == Np * Nʸ + 1
-@assert length(zs) == Np * Nᶻ + 1
-
-using NCDatasets
-
-ds = NCDataset("test.nc", "c")
-
-defDim(ds, "xE", Nˣ)
-defDim(ds, "yE", Nʸ)
-defDim(ds, "zE", Nᶻ)
-defDim(ds, "xP", Np+1)
-defDim(ds, "yP", Np+1)
-defDim(ds, "zP", Np+1)
-
-defVar(ds, "xE", collect(1:Nˣ),   ("xE",))
-defVar(ds, "yE", collect(1:Nʸ),   ("yE",))
-defVar(ds, "zE", collect(1:Nᶻ),   ("zE",))
-defVar(ds, "xP", collect(1:Np+1), ("xP",))
-defVar(ds, "yP", collect(1:Np+1), ("yP",))
-defVar(ds, "zP", collect(1:Np+1), ("zP",))
-
-dims_3d = ("xP", "yP", "zP", "zE", "yE", "xE")
-dims_2d = ("xP", "yP", "yE", "xE")
-
-x = defVar(ds, "x", Float64, dims_3d)
-y = defVar(ds, "y", Float64, dims_3d)
-z = defVar(ds, "z", Float64, dims_3d)
-
-u = defVar(ds, "u", Float64, dims_3d)
-v = defVar(ds, "v", Float64, dims_3d)
-η = defVar(ds, "η", Float64, dims_3d)
-θ = defVar(ds, "θ", Float64, dims_3d)
-
-U = defVar(ds, "U", Float64, dims_2d)
-V = defVar(ds, "V", Float64, dims_2d)
-Η = defVar(ds, "H", Float64, dims_2d)
-
-x[:, :, :, :, :, :] = gnd[:, :, :, 13, :, :, :] |> Array
-y[:, :, :, :, :, :] = gnd[:, :, :, 14, :, :, :] |> Array
-z[:, :, :, :, :, :] = gnd[:, :, :, 15, :, :, :] |> Array
-
-u[:, :, :, :, :, :] = Q3nd[:, :, :, 1, :, :, :] |> Array
-v[:, :, :, :, :, :] = Q3nd[:, :, :, 2, :, :, :] |> Array
-η[:, :, :, :, :, :] = Q3nd[:, :, :, 3, :, :, :] |> Array
-θ[:, :, :, :, :, :] = Q3nd[:, :, :, 4, :, :, :] |> Array
-
-U[:, :, :, :, :] = Q2nd[:, :, 1, :, :] |> Array
-V[:, :, :, :, :] = Q2nd[:, :, 2, :, :] |> Array
-Η[:, :, :, :, :] = Q2nd[:, :, 3, :, :] |> Array
-
-close(ds)
-
-x = gnd[:, :, :, 13, :, :, :] |> Array
-y = gnd[:, :, :, 14, :, :, :] |> Array
-z = gnd[:, :, :, 15, :, :, :] |> Array
-
-ΔX = (maximum(x) - minimum(x)) / Nˣ
-ΔY = (maximum(y) - minimum(y)) / Nʸ
-ΔZ = (maximum(z) - minimum(z)) / Nᶻ
-
-ΣNˣ = (Np+1)*Nˣ
-ΣNʸ = (Np+1)*Nʸ
-ΣNᶻ = (Np+1)*Nᶻ
-
-xs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
-ys = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
-zs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
-us = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
-vs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
-ηs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
-θs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
-
-for I in 1:Nˣ, J in 1:Nʸ, K in 1:Nᶻ
-    I′ = x[:, :, :, I, J, K] ./ ΔX |> maximum |> round |> Int
-    J′ = y[:, :, :, I, J, K] ./ ΔY |> maximum |> round |> Int
-    K′ = z[:, :, :, I, J, K] ./ ΔZ |> maximum |> round |> Int
-    K′ = Nᶻ + K′
-    println("($I, $J, $K) -> ($I′, $J′, $(Nᶻ+K′))")
-    
-    i_elem = (I′-1) * Nᵖ⁺¹ + 1 : I′ * Nᵖ⁺¹
-    j_elem = (J′-1) * Nᵖ⁺¹ + 1 : J′ * Nᵖ⁺¹
-    k_elem = (K′-1) * Nᵖ⁺¹ + 1 : K′ * Nᵖ⁺¹
-
-    xs[i_elem, j_elem, k_elem] .= x[:, :, :, I, J, K]
-    ys[i_elem, j_elem, k_elem] .= y[:, :, :, I, J, K]
-    zs[i_elem, j_elem, k_elem] .= z[:, :, :, I, J, K]
-    us[i_elem, j_elem, k_elem] .= u[:, :, :, I, J, K]
-    vs[i_elem, j_elem, k_elem] .= v[:, :, :, I, J, K]
-    ηs[i_elem, j_elem, k_elem] .= η[:, :, :, I, J, K]
-    θs[i_elem, j_elem, k_elem] .= θ[:, :, :, I, J, K]
-end
 
