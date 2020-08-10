@@ -121,7 +121,100 @@ function ocean_init_aux!(m::BarotropicModel, P::SimpleBox, A, geom)
     return nothing
 end
 
-function main()
+function make_callbacks(vtkpath, step, nout, mpicomm, odesolver, dg_slow, model_slow, Q_slow, dg_fast, model_fast, Q_fast)
+    if isdir(vtkpath)
+        rm(vtkpath, recursive = true)
+    end
+
+    mkpath(vtkpath)
+    mkpath(vtkpath * "/slow")
+    mkpath(vtkpath * "/fast")
+
+    function do_output(span, step, model, dg, Q)
+        outprefix = @sprintf("%s/%s/mpirank%04d_step%04d", vtkpath, span, MPI.Comm_rank(mpicomm), step)
+        @info "doing VTK output" outprefix
+        statenames = flattenednames(vars_state_conservative(model, eltype(Q)))
+        auxnames = flattenednames(vars_state_auxiliary(model, eltype(Q)))
+        writevtk(outprefix, Q, dg, statenames, dg.state_auxiliary, auxnames)
+    end
+
+    do_output("slow", step[1], model_slow, dg_slow, Q_slow)
+    cbvtk_slow = GenericCallbacks.EveryXSimulationSteps(nout) do (init = false)
+        do_output("slow", step[1], model_slow, dg_slow, Q_slow)
+        step[1] += 1
+        nothing
+    end
+
+    do_output("fast", step[2], model_fast, dg_fast, Q_fast)
+    cbvtk_fast = GenericCallbacks.EveryXSimulationSteps(nout) do (init = false)
+        do_output("fast", step[2], model_fast, dg_fast, Q_fast)
+        step[2] += 1
+        nothing
+    end
+
+    starttime = Ref(now())
+    cbinfo = GenericCallbacks.EveryXWallTimeSeconds(60, mpicomm) do (s = false)
+        if s
+            starttime[] = now()
+        else
+            energy = norm(Q_slow)
+            @info @sprintf(
+                """Update
+                simtime = %8.2f / %8.2f
+                runtime = %s
+                norm(Q) = %.16e""",
+                ODESolvers.gettime(odesolver), timeend,
+                Dates.format(
+                    convert(Dates.DateTime, Dates.now() - starttime[]),
+                    Dates.dateformat"HH:MM:SS",
+                ),
+                energy)
+        end
+    end
+
+    return (cbvtk_slow, cbvtk_fast, cbinfo)
+end
+
+#################
+# RUN THE TESTS #
+#################
+FT = Float64
+vtkpath = "vtk_split"
+
+const timeend = 5 * 24 * 3600 # s
+const tout = 24 * 3600 # s
+
+const N = 4
+const Nˣ = 20
+const Nʸ = 20
+const Nᶻ = 20
+const Lˣ = 4e6  # m
+const Lʸ = 4e6  # m
+const H = 1000  # m
+
+xrange = range(FT(0); length = Nˣ + 1, stop = Lˣ)
+yrange = range(FT(0); length = Nʸ + 1, stop = Lʸ)
+zrange = range(FT(-H); length = Nᶻ + 1, stop = 0)
+
+#const cʰ = sqrt(gravity * H)
+const cʰ = 1  # typical of ocean internal-wave speed
+const cᶻ = 0
+
+#- inverse ratio of additional fast time steps (for weighted average)
+#  --> do 1/add more time-steps and average from: 1 - 1/add up to: 1 + 1/add
+# e.g., = 1 --> 100% more ; = 2 --> 50% more ; = 3 --> 33% more ...
+add_fast_substeps = 2
+
+#- number of Implicit vertical-diffusion sub-time-steps within one model full time-step
+# default = 0 : disable implicit vertical diffusion
+numImplSteps = 5
+
+#const τₒ = 2e-1  # (Pa = N/m^2)
+# since we are using old BC (with factor of 2), take only half:
+const τₒ = 1e-1
+const λʳ = 10 // 86400 # m/s
+const θᴱ = 10    # deg.C
+
     mpicomm = MPI.COMM_WORLD
 
     ll = uppercase(get(ENV, "JULIA_LOG_LEVEL", "INFO"))
@@ -142,7 +235,7 @@ function main()
     grid_3D = DiscontinuousSpectralElementGrid(topl_3D, FloatType = FT, DeviceArray = ArrayType, polynomialorder = N)
 
     prob = SimpleBox{FT}(Lˣ, Lʸ, H, τₒ, λʳ, θᴱ)
-    gravity::FT = grav(param_set)
+    gravity = grav(param_set)
 
     #- set model time-step:
     dt_fast = 240
