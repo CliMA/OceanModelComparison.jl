@@ -353,6 +353,8 @@ const θᴱ = 10    # deg.C
     end
 
 Np = N
+Nᵖ⁺¹ = Np + 1
+
 gnd = reshape(dg.grid.vgeo, (Np+1, Np+1, Np+1, 16, Nˣ, Nʸ, Nᶻ))
 xs = gnd[:, :, :, 13, :, :, :] |> Array
 ys = gnd[:, :, :, 14, :, :, :] |> Array
@@ -433,3 +435,46 @@ v[:, :, :, :, :, :] = Q3nd[:, :, :, 2, :, :, :] |> Array
 U[:, :, :, :, :] = Q2nd[:, :, 1, :, :] |> Array
 V[:, :, :, :, :] = Q2nd[:, :, 2, :, :] |> Array
 Η[:, :, :, :, :] = Q2nd[:, :, 3, :, :] |> Array
+
+close(ds)
+
+x = gnd[:, :, :, 13, :, :, :] |> Array
+y = gnd[:, :, :, 14, :, :, :] |> Array
+z = gnd[:, :, :, 15, :, :, :] |> Array
+
+ΔX = (maximum(x) - minimum(x)) / Nˣ
+ΔY = (maximum(y) - minimum(y)) / Nʸ
+ΔZ = (maximum(z) - minimum(z)) / Nᶻ
+
+ΣNˣ = (Np+1)*Nˣ
+ΣNʸ = (Np+1)*Nʸ
+ΣNᶻ = (Np+1)*Nᶻ
+
+xs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+ys = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+zs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+us = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+vs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+ηs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+θs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+
+for I in 1:Nˣ, J in 1:Nʸ, K in 1:Nᶻ
+    I′ = x[:, :, :, I, J, K] ./ ΔX |> maximum |> round |> Int
+    J′ = y[:, :, :, I, J, K] ./ ΔY |> maximum |> round |> Int
+    K′ = z[:, :, :, I, J, K] ./ ΔZ |> maximum |> round |> Int
+    K′ = Nᶻ + K′
+    println("($I, $J, $K) -> ($I′, $J′, $(Nᶻ+K′))")
+    
+    i_elem = (I′-1) * Nᵖ⁺¹ + 1 : I′ * Nᵖ⁺¹
+    j_elem = (J′-1) * Nᵖ⁺¹ + 1 : J′ * Nᵖ⁺¹
+    k_elem = (K′-1) * Nᵖ⁺¹ + 1 : K′ * Nᵖ⁺¹
+
+    xs[i_elem, j_elem, k_elem] .= x[:, :, :, I, J, K]
+    ys[i_elem, j_elem, k_elem] .= y[:, :, :, I, J, K]
+    zs[i_elem, j_elem, k_elem] .= z[:, :, :, I, J, K]
+    us[i_elem, j_elem, k_elem] .= u[:, :, :, I, J, K]
+    vs[i_elem, j_elem, k_elem] .= v[:, :, :, I, J, K]
+    ηs[i_elem, j_elem, k_elem] .= η[:, :, :, I, J, K]
+    θs[i_elem, j_elem, k_elem] .= θ[:, :, :, I, J, K]
+end
+
