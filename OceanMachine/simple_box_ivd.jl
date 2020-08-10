@@ -352,101 +352,84 @@ const θᴱ = 10    # deg.C
         @info @sprintf("""Compare vs RefVals: %s""", checkRep )
     end
 
-    return nothing
-end
+Np = N
+gnd = reshape(dg.grid.vgeo, (Np+1, Np+1, Np+1, 16, Nˣ, Nʸ, Nᶻ))
+xs = gnd[:, :, :, 13, :, :, :] |> Array
+ys = gnd[:, :, :, 14, :, :, :] |> Array
+zs = gnd[:, :, :, 15, :, :, :] |> Array
 
-function make_callbacks(vtkpath, step, nout, mpicomm, odesolver, dg_slow, model_slow, Q_slow, dg_fast, model_fast, Q_fast)
-    if isdir(vtkpath)
-        rm(vtkpath, recursive = true)
-    end
+Q3nd = reshape(Q_3D.realdata, (Np+1, Np+1, Np+1, 4, Nˣ, Nʸ, Nᶻ))
+u = Q3nd[:, :, :, 1, :, :, :] |> Array
+v = Q3nd[:, :, :, 2, :, :, :] |> Array
+η = Q3nd[:, :, :, 3, :, :, :] |> Array
+θ = Q3nd[:, :, :, 4, :, :, :] |> Array
 
-    mkpath(vtkpath)
-    mkpath(vtkpath * "/slow")
-    mkpath(vtkpath * "/fast")
+Q2nd = reshape(Q_2D.realdata, (Np+1, Np+1, 3, Nˣ, Nʸ))
+U = Q2nd[:, :, 1, :, :] |> Array
+V = Q2nd[:, :, 2, :, :] |> Array
+Η = Q2nd[:, :, 3, :, :] |> Array
 
-    function do_output(span, step, model, dg, Q)
-        outprefix = @sprintf("%s/%s/mpirank%04d_step%04d", vtkpath, span, MPI.Comm_rank(mpicomm), step)
-        @info "doing VTK output" outprefix
-        statenames = flattenednames(vars_state_conservative(model, eltype(Q)))
-        auxnames = flattenednames(vars_state_auxiliary(model, eltype(Q)))
-        writevtk(outprefix, Q, dg, statenames, dg.state_auxiliary, auxnames)
-    end
-
-    do_output("slow", step[1], model_slow, dg_slow, Q_slow)
-    cbvtk_slow = GenericCallbacks.EveryXSimulationSteps(nout) do (init = false)
-        do_output("slow", step[1], model_slow, dg_slow, Q_slow)
-        step[1] += 1
-        nothing
-    end
-
-    do_output("fast", step[2], model_fast, dg_fast, Q_fast)
-    cbvtk_fast = GenericCallbacks.EveryXSimulationSteps(nout) do (init = false)
-        do_output("fast", step[2], model_fast, dg_fast, Q_fast)
-        step[2] += 1
-        nothing
-    end
-
-    starttime = Ref(now())
-    cbinfo = GenericCallbacks.EveryXWallTimeSeconds(60, mpicomm) do (s = false)
-        if s
-            starttime[] = now()
-        else
-            energy = norm(Q_slow)
-            @info @sprintf(
-                """Update
-                simtime = %8.2f / %8.2f
-                runtime = %s
-                norm(Q) = %.16e""",
-                ODESolvers.gettime(odesolver), timeend,
-                Dates.format(
-                    convert(Dates.DateTime, Dates.now() - starttime[]),
-                    Dates.dateformat"HH:MM:SS",
-                ),
-                energy)
+function dedup(x, ε=1e-2)
+    # x must be sorted before this
+    for i=2:length(x)
+	if abs(x[i] - x[i-1]) < ε
+            x[i] = x[i-1]
         end
     end
-
-    return (cbvtk_slow, cbvtk_fast, cbinfo)
+    return unique(x)
 end
 
-#################
-# RUN THE TESTS #
-#################
-FT = Float64
-vtkpath = "vtk_split"
+xs = dedup(sort(unique(xs)))
+ys = dedup(sort(unique(ys)))
+zs = dedup(sort(unique(zs)))
 
-const timeend = 5 * 24 * 3600 # s
-const tout = 24 * 3600 # s
+@assert length(xs) == Np * Nˣ + 1
+@assert length(ys) == Np * Nʸ + 1
+@assert length(zs) == Np * Nᶻ + 1
 
-const N = 4
-const Nˣ = 20
-const Nʸ = 20
-const Nᶻ = 20
-const Lˣ = 4e6  # m
-const Lʸ = 4e6  # m
-const H = 1000  # m
+using NCDatasets
 
-xrange = range(FT(0); length = Nˣ + 1, stop = Lˣ)
-yrange = range(FT(0); length = Nʸ + 1, stop = Lʸ)
-zrange = range(FT(-H); length = Nᶻ + 1, stop = 0)
+ds = NCDataset("test.nc", "c")
 
-#const cʰ = sqrt(gravity * H)
-const cʰ = 1  # typical of ocean internal-wave speed
-const cᶻ = 0
+defDim(ds, "xE", Nˣ)
+defDim(ds, "yE", Nʸ)
+defDim(ds, "zE", Nᶻ)
+defDim(ds, "xP", Np+1)
+defDim(ds, "yP", Np+1)
+defDim(ds, "zP", Np+1)
 
-#- inverse ratio of additional fast time steps (for weighted average)
-#  --> do 1/add more time-steps and average from: 1 - 1/add up to: 1 + 1/add
-# e.g., = 1 --> 100% more ; = 2 --> 50% more ; = 3 --> 33% more ...
-add_fast_substeps = 2
+defVar(ds, "xE", collect(1:Nˣ),   ("xE",))
+defVar(ds, "yE", collect(1:Nʸ),   ("yE",))
+defVar(ds, "zE", collect(1:Nᶻ),   ("zE",))
+defVar(ds, "xP", collect(1:Np+1), ("xP",))
+defVar(ds, "yP", collect(1:Np+1), ("yP",))
+defVar(ds, "zP", collect(1:Np+1), ("zP",))
 
-#- number of Implicit vertical-diffusion sub-time-steps within one model full time-step
-# default = 0 : disable implicit vertical diffusion
-numImplSteps = 5
+dims_3d = ("xP", "yP", "zP", "zE", "yE", "xE")
+dims_2d = ("xP", "yP", "yE", "xE")
 
-#const τₒ = 2e-1  # (Pa = N/m^2)
-# since we are using old BC (with factor of 2), take only half:
-const τₒ = 1e-1
-const λʳ = 10 // 86400 # m/s
-const θᴱ = 10    # deg.C
+x = defVar(ds, "x", Float64, dims_3d)
+y = defVar(ds, "y", Float64, dims_3d)
+z = defVar(ds, "z", Float64, dims_3d)
 
-main()
+u = defVar(ds, "u", Float64, dims_3d)
+v = defVar(ds, "v", Float64, dims_3d)
+η = defVar(ds, "η", Float64, dims_3d)
+θ = defVar(ds, "θ", Float64, dims_3d)
+
+U = defVar(ds, "U", Float64, dims_2d)
+V = defVar(ds, "V", Float64, dims_2d)
+Η = defVar(ds, "H", Float64, dims_2d)
+
+x[:, :, :, :, :, :] = gnd[:, :, :, 13, :, :, :] |> Array
+y[:, :, :, :, :, :] = gnd[:, :, :, 14, :, :, :] |> Array
+z[:, :, :, :, :, :] = gnd[:, :, :, 15, :, :, :] |> Array
+
+u[:, :, :, :, :, :] = Q3nd[:, :, :, 1, :, :, :] |> Array
+v[:, :, :, :, :, :] = Q3nd[:, :, :, 2, :, :, :] |> Array
+η[:, :, :, :, :, :] = Q3nd[:, :, :, 3, :, :, :] |> Array
+θ[:, :, :, :, :, :] = Q3nd[:, :, :, 4, :, :, :] |> Array
+
+U[:, :, :, :, :] = Q2nd[:, :, 1, :, :] |> Array
+V[:, :, :, :, :] = Q2nd[:, :, 2, :, :] |> Array
+Η[:, :, :, :, :] = Q2nd[:, :, 3, :, :] |> Array
