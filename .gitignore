@@ -28,6 +28,7 @@ docs/site/
 # Plots
 *.png
 *.mp4
+*.gif
 
 # Script-specific output
 vtk_split
