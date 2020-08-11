@@ -24,7 +24,8 @@ for n in range(Nt):
     η_mesh, θ_mesh = axes[1, 0], axes[1, 1]
 
     # img_u = u.plot.pcolormesh(ax=u_mesh, vmin=-0.2, vmax=0.2, cmap=cmocean.cm.balance, add_colorbar=False)
-    img_u = u_mesh.pcolormesh(x.values, y.values, u.values, vmin=-0.2, vmax=0.2, cmap=cmocean.cm.balance, shading="gouraud") 
+    # img_u = u_mesh.pcolormesh(x.values, y.values, u.values, vmin=-0.2, vmax=0.2, cmap=cmocean.cm.balance, shading="gouraud") 
+    img_u = u_mesh.scatter(x.values.flatten(), y.values.flatten(), c=u.values.flatten(), s=1, vmin=-0.2, vmax=0.2, cmap=cmocean.cm.balance)
     fig.colorbar(img_u, ax=u_mesh, label="m/s", extend="both")
     u_mesh.set_title("u-velocity")
     u_mesh.set_xlabel("x (km)")
@@ -32,7 +33,8 @@ for n in range(Nt):
     u_mesh.set_aspect("equal")
 
     # img_v = v.plot.pcolormesh(ax=v_mesh, vmin=-0.2, vmax=0.2, cmap=cmocean.cm.balance, add_colorbar=False)
-    img_v = v_mesh.pcolormesh(x.values, y.values, v.values, vmin=-0.2, vmax=0.2, cmap=cmocean.cm.balance, shading="gouraud") 
+    # img_v = v_mesh.pcolormesh(x.values, y.values, v.values, vmin=-0.2, vmax=0.2, cmap=cmocean.cm.balance, shading="gouraud") 
+    img_v = v_mesh.scatter(x.values.flatten(), y.values.flatten(), c=v.values.flatten(), s=1, vmin=-0.2, vmax=0.2, cmap=cmocean.cm.balance)
     fig.colorbar(img_v, ax=v_mesh, label="m/s", extend="both")
     v_mesh.set_title("v-velocity")
     v_mesh.set_xlabel("x (km)")
@@ -40,7 +42,8 @@ for n in range(Nt):
     v_mesh.set_aspect("equal")
 
     # img_η = η.plot.pcolormesh(ax=η_mesh, vmin=-1, vmax=1, cmap=cmocean.cm.balance, add_colorbar=False)
-    img_η = η_mesh.pcolormesh(x.values, y.values, η.values, vmin=-1, vmax=1, cmap=cmocean.cm.balance, shading="gouraud") 
+    # img_η = η_mesh.pcolormesh(x.values, y.values, η.values, vmin=-1, vmax=1, cmap=cmocean.cm.balance, shading="gouraud") 
+    img_η = η_mesh.scatter(x.values.flatten(), y.values.flatten(), c=η.values.flatten(), s=1, vmin=-1, vmax=1, cmap=cmocean.cm.balance)
     fig.colorbar(img_η, ax=η_mesh, label="m", extend="both")
     η_mesh.set_title("Sea surface height η")
     η_mesh.set_xlabel("x (km)")
@@ -48,7 +51,8 @@ for n in range(Nt):
     η_mesh.set_aspect("equal")
 
     # img_θ = θ.plot.pcolormesh(ax=θ_mesh, vmin=0, vmax=10, cmap=cmocean.cm.thermal, add_colorbar=False)
-    img_θ = θ_mesh.pcolormesh(x.values, y.values, θ.values, vmin=0, vmax=10, cmap=cmocean.cm.thermal, shading="gouraud") 
+    # img_θ = θ_mesh.pcolormesh(x.values, y.values, θ.values, vmin=0, vmax=10, cmap=cmocean.cm.thermal, shading="gouraud") 
+    img_θ = θ_mesh.scatter(x.values.flatten(), y.values.flatten(), c=θ.values.flatten(), s=1, vmin=0, vmax=10, cmap=cmocean.cm.thermal)
     fig.colorbar(img_θ, ax=θ_mesh, label="°C", extend="both")
     θ_mesh.set_title("Temperature θ")
     θ_mesh.set_xlabel("x (km)")
@@ -63,7 +67,7 @@ for n in range(Nt):
 (
     ffmpeg
     .input(f"simple_box_ivdc_%02d.png", framerate=30)
-    .output(f"simple_box_ivdc_gouraud.mp4", crf=15, pix_fmt='yuv420p')
+    .output(f"simple_box_ivdc_scatter.mp4", crf=15, pix_fmt='yuv420p')
     .overwrite_output()
     .run()
 )
