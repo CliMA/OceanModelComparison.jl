@@ -5,6 +5,7 @@ using LinearAlgebra
 
 using MPI
 using StaticArrays
+using NCDatasets
 
 using ClimateMachine
 ClimateMachine.init(parse_clargs = true)
@@ -121,176 +122,97 @@ function ocean_init_aux!(m::BarotropicModel, P::SimpleBox, A, geom)
     return nothing
 end
 
-function main()
-    mpicomm = MPI.COMM_WORLD
+function make_callbacks(step, nout, mpicomm, odesolver, dg_slow, model_slow, Q_slow, dg_fast, model_fast, Q_fast)
+    Np = N
+    Nᵖ⁺¹ = Np + 1
 
-    ll = uppercase(get(ENV, "JULIA_LOG_LEVEL", "INFO"))
-    loglevel = ll == "DEBUG" ? Logging.Debug :
-               ll == "WARN"  ? Logging.Warn  :
-               ll == "ERROR" ? Logging.Error : Logging.Info
-    logger_stream = MPI.Comm_rank(mpicomm) == 0 ? stderr : devnull
-    global_logger(ConsoleLogger(logger_stream, loglevel))
+    ΣNˣ = (Np+1)*Nˣ
+    ΣNʸ = (Np+1)*Nʸ
+    ΣNᶻ = (Np+1)*Nᶻ
 
-    brickrange_2D = (xrange, yrange)
-    topl_2D = BrickTopology(mpicomm, brickrange_2D, periodicity = (false, false))
-    grid_2D = DiscontinuousSpectralElementGrid(topl_2D, FloatType = FT, DeviceArray = ArrayType,
-                                               polynomialorder = N)
+    gnd = reshape(dg_slow.grid.vgeo, (Np+1, Np+1, Np+1, 16, Nᶻ, Nʸ, Nˣ))
+    x = gnd[:, :, :, 13, :, :, :] |> Array
+    y = gnd[:, :, :, 14, :, :, :] |> Array
+    z = gnd[:, :, :, 15, :, :, :] |> Array
 
-    brickrange_3D = (xrange, yrange, zrange)
-    topl_3D = StackedBrickTopology(mpicomm, brickrange_3D; periodicity = (false, false, false),
-                                   boundary = ((1, 1), (1, 1), (2, 3)))
-    grid_3D = DiscontinuousSpectralElementGrid(topl_3D, FloatType = FT, DeviceArray = ArrayType, polynomialorder = N)
+    ΔX = (maximum(x) - minimum(x)) / Nˣ
+    ΔY = (maximum(y) - minimum(y)) / Nʸ
+    ΔZ = (maximum(z) - minimum(z)) / Nᶻ
 
-    prob = SimpleBox{FT}(Lˣ, Lʸ, H, τₒ, λʳ, θᴱ)
-    gravity::FT = grav(param_set)
+    ds = NCDataset("simple_box_ivd.nc", "c")
 
-    #- set model time-step:
-    dt_fast = 240
-    dt_slow = 5400
-    
-    nout = ceil(Int64, tout / dt_slow)
-    dt_slow = tout / nout
-    numImplSteps > 0 ? ivdc_dt = dt_slow / FT(numImplSteps) : ivdc_dt = dt_slow
+    defDim(ds, "time", Inf)
+    defVar(ds, "time", Float64, ("time",))
 
-    model = OceanModel{FT}(prob, grav = gravity, cʰ = cʰ, add_fast_substeps = add_fast_substeps,
-                           numImplSteps = numImplSteps, ivdc_dt = ivdc_dt, κᶜ = FT(0.1))
+    defDim(ds, "x", ΣNˣ)
+    defDim(ds, "y", ΣNʸ)
+    defDim(ds, "z", ΣNᶻ)
 
-    barotropicmodel = BarotropicModel(model)
+    defVar(ds, "x_nodal", Float64, ("x", "y", "z"))
+    defVar(ds, "y_nodal", Float64, ("x", "y", "z"))
+    defVar(ds, "z_nodal", Float64, ("x", "y", "z"))
 
-    minΔx = min_node_distance(grid_3D, HorizontalDirection())
-    minΔz = min_node_distance(grid_3D, VerticalDirection())
-    
-    #- 2 horiz directions
-    gravity_max_dT = 1 / ( 2 * sqrt(gravity * H) / minΔx )
+    defVar(ds, "u", Float64, ("x", "y", "z", "time"))
+    defVar(ds, "v", Float64, ("x", "y", "z", "time"))
+    defVar(ds, "η", Float64, ("x", "y", "z", "time"))
+    defVar(ds, "θ", Float64, ("x", "y", "z", "time"))
 
-    #- 2 horiz directions + harmonic visc or diffusion: 2^2 factor in CFL:
-    viscous_max_dT = 1 / ( 2 * model.νʰ / minΔx^2 + model.νᶻ / minΔz^2 )/ 4
-    diffusive_max_dT = 1 / ( 2 * model.κʰ / minΔx^2 + model.κᶻ / minΔz^2 )/ 4
+    netcdf_output = GenericCallbacks.EveryXSimulationSteps(1) do (init = false)
+        time_index = length(ds["time"]) + 1
 
-    @info @sprintf(
-        """Update
-           Gravity Max-dT = %.1f
-           Timestep       = %.1f""",
-        gravity_max_dT, dt_fast)
+        if time_index == 1
+            xs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+            ys = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+            zs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+        end
 
-    @info @sprintf(
-        """Update
-       Viscous   Max-dT = %.1f
-       Diffusive Max-dT = %.1f
-       Timestep      = %.1f""",
-        viscous_max_dT, diffusive_max_dT, dt_slow)
+        Q3nd = reshape(Q_slow.realdata, (Np+1, Np+1, Np+1, 4, Nᶻ, Nʸ, Nˣ))
+        u = Q3nd[:, :, :, 1, :, :, :] |> Array
+        v = Q3nd[:, :, :, 2, :, :, :] |> Array
+        η = Q3nd[:, :, :, 3, :, :, :] |> Array
+        θ = Q3nd[:, :, :, 4, :, :, :] |> Array
 
-    dg = OceanDGModel(
-        model, grid_3D,
-    #   CentralNumericalFluxFirstOrder(),
-        RusanovNumericalFlux(),
-        CentralNumericalFluxSecondOrder(),
-        CentralNumericalFluxGradient(),
-    )
+        us = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+        vs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+        ηs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
+        θs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
 
-    barotropic_dg = DGModel(
-        barotropicmodel, grid_2D,
-    #   CentralNumericalFluxFirstOrder(),
-        RusanovNumericalFlux(),
-        CentralNumericalFluxSecondOrder(),
-        CentralNumericalFluxGradient(),
-    )
+        for I in 1:Nˣ, J in 1:Nʸ, K in 1:Nᶻ
+            I′ = x[:, :, :, K, J, I] ./ ΔX |> maximum |> round |> Int
+            J′ = y[:, :, :, K, J, I] ./ ΔY |> maximum |> round |> Int
+            K′ = z[:, :, :, K, J, I] ./ ΔZ |> maximum |> round |> Int
+            K′ = Nᶻ + K′
 
-    Q_3D = init_ode_state(dg, FT(0); init_on_cpu = true)
-    Q_2D = init_ode_state(barotropic_dg, FT(0); init_on_cpu = true)
+            @debug "($I, $J, $K) -> ($I′, $J′, $(Nᶻ+K′))"
 
-    lsrk_ocean = LSRK54CarpenterKennedy(dg, Q_3D, dt = dt_slow, t0 = 0)
-    lsrk_barotropic = LSRK54CarpenterKennedy(barotropic_dg, Q_2D, dt = dt_fast, t0 = 0)
+            i_elem = (I′-1) * Nᵖ⁺¹ + 1 : I′ * Nᵖ⁺¹
+            j_elem = (J′-1) * Nᵖ⁺¹ + 1 : J′ * Nᵖ⁺¹
+            k_elem = (K′-1) * Nᵖ⁺¹ + 1 : K′ * Nᵖ⁺¹
 
-    odesolver = SplitExplicitLSRK2nSolver(lsrk_ocean, lsrk_barotropic)
+            if time_index == 1
+                xs[i_elem, j_elem, k_elem] .= x[:, :, :, K, J, I]
+                ys[i_elem, j_elem, k_elem] .= y[:, :, :, K, J, I]
+                zs[i_elem, j_elem, k_elem] .= z[:, :, :, K, J, I]
+            end
 
-    # Set up State Check call back for config state arrays, called every ntFreq time steps
-    ntFreq=1
-    cbcs_dg=ClimateMachine.StateCheck.sccreate(
-            [(Q_3D,"oce Q_3D",),
-             (dg.state_auxiliary,"oce aux",),
-        #    (dg.diffstate,"oce diff",),
-        #    (lsrk_ocean.dQ,"oce_dQ",),
-        #    (dg.modeldata.tendency_dg.state_auxiliary,"tend Int aux",),
-        #    (dg.modeldata.conti3d_Q,"conti3d_Q",),
-             (Q_2D,"baro Q_2D",),
-             (barotropic_dg.state_auxiliary ,"baro aux",)
-	    ],
-            ntFreq; prec=12)
+            us[i_elem, j_elem, k_elem] .= u[:, :, :, K, J, I]
+            vs[i_elem, j_elem, k_elem] .= v[:, :, :, K, J, I]
+            ηs[i_elem, j_elem, k_elem] .= η[:, :, :, K, J, I]
+            θs[i_elem, j_elem, k_elem] .= θ[:, :, :, K, J, I]
+        end
 
-    step = [0, 0]
-    cbvector = make_callbacks(vtkpath, step, nout, mpicomm, odesolver, dg, model, Q_3D,
-			      barotropic_dg, barotropicmodel, Q_2D)
+        if time_index == 1
+            ds["x_nodal"][:, :, :] = xs
+            ds["y_nodal"][:, :, :] = ys
+            ds["z_nodal"][:, :, :] = zs
+        end
 
-    eng0 = norm(Q_3D)
+        ds["u"][:, :, :, time_index] = us
+        ds["v"][:, :, :, time_index] = vs
+        ds["η"][:, :, :, time_index] = ηs
+        ds["θ"][:, :, :, time_index] = θs
 
-    @info @sprintf """Starting
-    norm(Q₀) = %.16e
-    ArrayType = %s""" eng0 ArrayType
-
-    # slow fast state tuple
-    Qvec = (slow = Q_3D, fast = Q_2D)
-    # solve!(Qvec, odesolver; timeend = timeend, callbacks = cbvector)
-    cbv=(cbvector...,cbcs_dg)
-    solve!(Qvec, odesolver; timeend = timeend, callbacks = cbv)
-
-    ## Enable the code block below to print table for use in reference value code
-    ## reference value code sits in a file named $(@__FILE__)_refvals.jl. It is hand
-    ## edited using code generated by block below when reference values are updated.
-    regenRefVals = false
-    if regenRefVals
-        ## Print state statistics in format for use as reference values
-        println(
-            "# SC ========== Test number ", 1,
-            " reference values and precision match template. =======",
-        )
-        println("# SC ========== $(@__FILE__) test reference values ======================================")
-        ClimateMachine.StateCheck.scprintref(cbcs_dg)
-        println("# SC ====================================================================================")
-    end
-
-    ## Check results against reference if present
-    checkRefVals = true
-    if checkRefVals
-        include("simple_box_ivd_refvals.jl")
-        refDat = (refVals[1], refPrecs[1])
-        checkPass = ClimateMachine.StateCheck.scdocheck(cbcs_dg, refDat)
-        checkPass ? checkRep = "Pass" : checkRep = "Fail"
-        @info @sprintf("""Compare vs RefVals: %s""", checkRep )
-    end
-
-    return nothing
-end
-
-function make_callbacks(vtkpath, step, nout, mpicomm, odesolver, dg_slow, model_slow, Q_slow, dg_fast, model_fast, Q_fast)
-    if isdir(vtkpath)
-        rm(vtkpath, recursive = true)
-    end
-
-    mkpath(vtkpath)
-    mkpath(vtkpath * "/slow")
-    mkpath(vtkpath * "/fast")
-
-    function do_output(span, step, model, dg, Q)
-        outprefix = @sprintf("%s/%s/mpirank%04d_step%04d", vtkpath, span, MPI.Comm_rank(mpicomm), step)
-        @info "doing VTK output" outprefix
-        statenames = flattenednames(vars_state_conservative(model, eltype(Q)))
-        auxnames = flattenednames(vars_state_auxiliary(model, eltype(Q)))
-        writevtk(outprefix, Q, dg, statenames, dg.state_auxiliary, auxnames)
-    end
-
-    do_output("slow", step[1], model_slow, dg_slow, Q_slow)
-    cbvtk_slow = GenericCallbacks.EveryXSimulationSteps(nout) do (init = false)
-        do_output("slow", step[1], model_slow, dg_slow, Q_slow)
-        step[1] += 1
-        nothing
-    end
-
-    do_output("fast", step[2], model_fast, dg_fast, Q_fast)
-    cbvtk_fast = GenericCallbacks.EveryXSimulationSteps(nout) do (init = false)
-        do_output("fast", step[2], model_fast, dg_fast, Q_fast)
-        step[2] += 1
-        nothing
+        sync(ds)
     end
 
     starttime = Ref(now())
@@ -313,14 +235,13 @@ function make_callbacks(vtkpath, step, nout, mpicomm, odesolver, dg_slow, model_
         end
     end
 
-    return (cbvtk_slow, cbvtk_fast, cbinfo)
+    return (netcdf_output, cbinfo)
 end
 
 #################
 # RUN THE TESTS #
 #################
 FT = Float64
-vtkpath = "vtk_split"
 
 const timeend = 5 * 24 * 3600 # s
 const tout = 24 * 3600 # s
@@ -356,4 +277,139 @@ const τₒ = 1e-1
 const λʳ = 10 // 86400 # m/s
 const θᴱ = 10    # deg.C
 
-main()
+mpicomm = MPI.COMM_WORLD
+
+ll = uppercase(get(ENV, "JULIA_LOG_LEVEL", "INFO"))
+loglevel = ll == "DEBUG" ? Logging.Debug :
+           ll == "WARN"  ? Logging.Warn  :
+           ll == "ERROR" ? Logging.Error : Logging.Info
+logger_stream = MPI.Comm_rank(mpicomm) == 0 ? stderr : devnull
+global_logger(ConsoleLogger(logger_stream, loglevel))
+
+brickrange_2D = (xrange, yrange)
+topl_2D = BrickTopology(mpicomm, brickrange_2D, periodicity = (false, false))
+grid_2D = DiscontinuousSpectralElementGrid(topl_2D, FloatType = FT, DeviceArray = ArrayType,
+                                           polynomialorder = N)
+
+brickrange_3D = (xrange, yrange, zrange)
+topl_3D = StackedBrickTopology(mpicomm, brickrange_3D; periodicity = (false, false, false),
+                               boundary = ((1, 1), (1, 1), (2, 3)))
+grid_3D = DiscontinuousSpectralElementGrid(topl_3D, FloatType = FT, DeviceArray = ArrayType, polynomialorder = N)
+
+prob = SimpleBox{FT}(Lˣ, Lʸ, H, τₒ, λʳ, θᴱ)
+gravity = grav(param_set)
+
+#- set model time-step:
+dt_fast = 240
+dt_slow = 5400
+
+nout = ceil(Int64, tout / dt_slow)
+dt_slow = tout / nout
+numImplSteps > 0 ? ivdc_dt = dt_slow / FT(numImplSteps) : ivdc_dt = dt_slow
+
+model = OceanModel{FT}(prob, grav = gravity, cʰ = cʰ, add_fast_substeps = add_fast_substeps,
+                       numImplSteps = numImplSteps, ivdc_dt = ivdc_dt, κᶜ = FT(0.1))
+
+barotropicmodel = BarotropicModel(model)
+
+minΔx = min_node_distance(grid_3D, HorizontalDirection())
+minΔz = min_node_distance(grid_3D, VerticalDirection())
+
+#- 2 horiz directions
+gravity_max_dT = 1 / ( 2 * sqrt(gravity * H) / minΔx )
+
+#- 2 horiz directions + harmonic visc or diffusion: 2^2 factor in CFL:
+viscous_max_dT = 1 / ( 2 * model.νʰ / minΔx^2 + model.νᶻ / minΔz^2 )/ 4
+diffusive_max_dT = 1 / ( 2 * model.κʰ / minΔx^2 + model.κᶻ / minΔz^2 )/ 4
+
+@info @sprintf(
+    """Update
+       Gravity Max-dT = %.1f
+       Timestep       = %.1f""",
+    gravity_max_dT, dt_fast)
+
+@info @sprintf(
+    """Update
+   Viscous   Max-dT = %.1f
+   Diffusive Max-dT = %.1f
+   Timestep      = %.1f""",
+    viscous_max_dT, diffusive_max_dT, dt_slow)
+
+dg = OceanDGModel(
+    model, grid_3D,
+#   CentralNumericalFluxFirstOrder(),
+    RusanovNumericalFlux(),
+    CentralNumericalFluxSecondOrder(),
+    CentralNumericalFluxGradient(),
+)
+
+barotropic_dg = DGModel(
+    barotropicmodel, grid_2D,
+#   CentralNumericalFluxFirstOrder(),
+    RusanovNumericalFlux(),
+    CentralNumericalFluxSecondOrder(),
+    CentralNumericalFluxGradient(),
+)
+
+Q_3D = init_ode_state(dg, FT(0); init_on_cpu = true)
+Q_2D = init_ode_state(barotropic_dg, FT(0); init_on_cpu = true)
+
+lsrk_ocean = LSRK54CarpenterKennedy(dg, Q_3D, dt = dt_slow, t0 = 0)
+lsrk_barotropic = LSRK54CarpenterKennedy(barotropic_dg, Q_2D, dt = dt_fast, t0 = 0)
+
+odesolver = SplitExplicitLSRK2nSolver(lsrk_ocean, lsrk_barotropic)
+
+# Set up State Check call back for config state arrays, called every ntFreq time steps
+ntFreq=1
+cbcs_dg=ClimateMachine.StateCheck.sccreate(
+        [(Q_3D,"oce Q_3D",),
+         (dg.state_auxiliary,"oce aux",),
+    #    (dg.diffstate,"oce diff",),
+    #    (lsrk_ocean.dQ,"oce_dQ",),
+    #    (dg.modeldata.tendency_dg.state_auxiliary,"tend Int aux",),
+    #    (dg.modeldata.conti3d_Q,"conti3d_Q",),
+         (Q_2D,"baro Q_2D",),
+         (barotropic_dg.state_auxiliary ,"baro aux",)
+    ],
+        ntFreq; prec=12)
+
+step = [0, 0]
+cbvector = make_callbacks(step, nout, mpicomm, odesolver, dg, model, Q_3D,
+      barotropic_dg, barotropicmodel, Q_2D)
+
+eng0 = norm(Q_3D)
+
+@info @sprintf """Starting
+norm(Q₀) = %.16e
+ArrayType = %s""" eng0 ArrayType
+
+# slow fast state tuple
+Qvec = (slow = Q_3D, fast = Q_2D)
+# solve!(Qvec, odesolver; timeend = timeend, callbacks = cbvector)
+cbv=(cbvector...,cbcs_dg)
+solve!(Qvec, odesolver; timeend = timeend, callbacks = cbv)
+
+## Enable the code block below to print table for use in reference value code
+## reference value code sits in a file named $(@__FILE__)_refvals.jl. It is hand
+## edited using code generated by block below when reference values are updated.
+regenRefVals = false
+if regenRefVals
+    ## Print state statistics in format for use as reference values
+    println(
+        "# SC ========== Test number ", 1,
+        " reference values and precision match template. =======",
+    )
+    println("# SC ========== $(@__FILE__) test reference values ======================================")
+    ClimateMachine.StateCheck.scprintref(cbcs_dg)
+    println("# SC ====================================================================================")
+end
+
+## Check results against reference if present
+checkRefVals = true
+if checkRefVals
+    include("simple_box_ivd_refvals.jl")
+    refDat = (refVals[1], refPrecs[1])
+    checkPass = ClimateMachine.StateCheck.scdocheck(cbcs_dg, refDat)
+    checkPass ? checkRep = "Pass" : checkRep = "Fail"
+    @info @sprintf("""Compare vs RefVals: %s""", checkRep )
+end

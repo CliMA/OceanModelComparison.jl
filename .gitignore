@@ -25,6 +25,11 @@ docs/site/
 *.jld2
 *.vtk
 
+# Plots
+*.png
+*.mp4
+*.gif
+
 # Script-specific output
 vtk_split
 
