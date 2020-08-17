@@ -130,7 +130,7 @@ function make_callbacks(step, nout, mpicomm, odesolver, dg_slow, model_slow, Q_s
     ΣNʸ = (Np+1)*Nʸ
     ΣNᶻ = (Np+1)*Nᶻ
 
-    gnd = reshape(dg_slow.grid.vgeo, (Np+1, Np+1, Np+1, 16, Nˣ, Nʸ, Nᶻ))
+    gnd = reshape(dg_slow.grid.vgeo, (Np+1, Np+1, Np+1, 16, Nᶻ, Nʸ, Nˣ))
     x = gnd[:, :, :, 13, :, :, :] |> Array
     y = gnd[:, :, :, 14, :, :, :] |> Array
     z = gnd[:, :, :, 15, :, :, :] |> Array
@@ -166,7 +166,7 @@ function make_callbacks(step, nout, mpicomm, odesolver, dg_slow, model_slow, Q_s
             zs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
         end
 
-        Q3nd = reshape(Q_slow.realdata, (Np+1, Np+1, Np+1, 4, Nˣ, Nʸ, Nᶻ))
+        Q3nd = reshape(Q_slow.realdata, (Np+1, Np+1, Np+1, 4, Nᶻ, Nʸ, Nˣ))
         u = Q3nd[:, :, :, 1, :, :, :] |> Array
         v = Q3nd[:, :, :, 2, :, :, :] |> Array
         η = Q3nd[:, :, :, 3, :, :, :] |> Array
@@ -178,9 +178,9 @@ function make_callbacks(step, nout, mpicomm, odesolver, dg_slow, model_slow, Q_s
         θs = zeros(ΣNˣ, ΣNʸ, ΣNᶻ)
 
         for I in 1:Nˣ, J in 1:Nʸ, K in 1:Nᶻ
-            I′ = x[:, :, :, I, J, K] ./ ΔX |> maximum |> round |> Int
-            J′ = y[:, :, :, I, J, K] ./ ΔY |> maximum |> round |> Int
-            K′ = z[:, :, :, I, J, K] ./ ΔZ |> maximum |> round |> Int
+            I′ = x[:, :, :, K, J, I] ./ ΔX |> maximum |> round |> Int
+            J′ = y[:, :, :, K, J, I] ./ ΔY |> maximum |> round |> Int
+            K′ = z[:, :, :, K, J, I] ./ ΔZ |> maximum |> round |> Int
             K′ = Nᶻ + K′
 
             @debug "($I, $J, $K) -> ($I′, $J′, $(Nᶻ+K′))"
@@ -190,15 +190,15 @@ function make_callbacks(step, nout, mpicomm, odesolver, dg_slow, model_slow, Q_s
             k_elem = (K′-1) * Nᵖ⁺¹ + 1 : K′ * Nᵖ⁺¹
 
             if time_index == 1
-                xs[i_elem, j_elem, k_elem] .= x[:, :, :, I, J, K]
-                ys[i_elem, j_elem, k_elem] .= y[:, :, :, I, J, K]
-                zs[i_elem, j_elem, k_elem] .= z[:, :, :, I, J, K]
+                xs[i_elem, j_elem, k_elem] .= x[:, :, :, K, J, I]
+                ys[i_elem, j_elem, k_elem] .= y[:, :, :, K, J, I]
+                zs[i_elem, j_elem, k_elem] .= z[:, :, :, K, J, I]
             end
 
-            us[i_elem, j_elem, k_elem] .= u[:, :, :, I, J, K]
-            vs[i_elem, j_elem, k_elem] .= v[:, :, :, I, J, K]
-            ηs[i_elem, j_elem, k_elem] .= η[:, :, :, I, J, K]
-            θs[i_elem, j_elem, k_elem] .= θ[:, :, :, I, J, K]
+            us[i_elem, j_elem, k_elem] .= u[:, :, :, K, J, I]
+            vs[i_elem, j_elem, k_elem] .= v[:, :, :, K, J, I]
+            ηs[i_elem, j_elem, k_elem] .= η[:, :, :, K, J, I]
+            θs[i_elem, j_elem, k_elem] .= θ[:, :, :, K, J, I]
         end
 
         if time_index == 1
