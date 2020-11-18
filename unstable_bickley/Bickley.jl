@@ -1,6 +1,7 @@
 module Bickley
 
 # The Bickley jet
+Ψ(y) = - tanh(y)
 U(y) = sech(y)^2
 
 # A sinusoidal tracer

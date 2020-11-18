@@ -33,13 +33,11 @@ function run(; Nh=128, output_time_interval=2, stop_time=200, arch=CPU(), ν=0)
 
     # ** Initial conditions **
     #
-    # on u, v: Large-scale jet + vortical perturbations
-    # on c: sinusoid
+    # u, v: Large-scale jet + vortical perturbations
+    #    c: Sinusoid
     
-    # Perturbations: O(ϵ) vortices + O(ϵ²) noise, with
-    ϵ = 0.1 
-
-    # Gaussian-masked sinusoidal vortices with
+    # Parameters
+    ϵ = 0.1 # perturbation magnitude
     ℓ = 0.5 # Gaussian width
     k = 0.5 # Sinusoidal wavenumber
 
