@@ -194,5 +194,5 @@ function visualize(name, contours=false)
     return nothing
 end
 
-name = run(Ne=32, Np=2, safety=0.5)
+name = run(Ne=8, Np=3, safety=0.1)
 visualize(name)

@@ -52,7 +52,7 @@ function run(; Nh=128, output_time_interval=2, stop_time=200, arch=CPU(), ν=0)
                                    sim.model.clock.iteration, sim.model.clock.time,
                                    sim.Δt.Δt, maximum(abs, u.data.parent)))
 
-    wizard = TimeStepWizard(cfl=1.0, Δt=1e-1, max_change=1.1, max_Δt=10.0)
+    wizard = TimeStepWizard(cfl=1.0, Δt=1e-2, max_change=1.1, max_Δt=10.0)
 
     simulation = Simulation(model, Δt=wizard, stop_time=stop_time,
                             iteration_interval=10, progress=progress)
@@ -166,7 +166,7 @@ function visualize(name, contours=false)
     return nothing
 end
 
-for Nh in (16, 24, 32, 48, 64, 96, 128)
+for Nh in (192,)
     name = run(Nh=Nh)
     analyze(name)
     visualize(name)
