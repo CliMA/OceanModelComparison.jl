@@ -15,9 +15,14 @@ include("Bickley.jl")
 
 using .Bickley
 
-function run(; Nh=128, output_time_interval=2, stop_time=200, arch=CPU(), ν=0)
+function run(; Nh = 128,
+               output_time_interval = 2,
+               stop_time = 200,
+               arch = CPU(),
+               ν = 0,
+               advection = WENO5())
 
-    name = "oceananigans_unstable_bickley_jet_Nh$Nh"
+    name = "oceananigans_unstable_bickley_jet_Nh$(Nh)_$(typeof(advection).name.wrapper)"
 
     grid = RegularCartesianGrid(size=(Nh, Nh, 1),
                                 x = (-2π, 2π), y=(-2π, 2π), z=(0, 1),
@@ -25,7 +30,7 @@ function run(; Nh=128, output_time_interval=2, stop_time=200, arch=CPU(), ν=0)
 
     model = IncompressibleModel(architecture = arch,
                                  timestepper = :RungeKutta3, 
-                                   advection = WENO5(),
+                                   advection = advection,
                                         grid = grid,
                                      tracers = :c,
                                      closure = IsotropicDiffusivity(ν=ν, κ=ν),
@@ -166,8 +171,8 @@ function visualize(name, contours=false)
     return nothing
 end
 
-for Nh in (192,)
-    name = run(Nh=Nh)
+for Nh in (32, 64, 128, 256,)
+    name = run(Nh=Nh, advection=CenteredFourthOrder())
     analyze(name)
     visualize(name)
 end
