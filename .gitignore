@@ -33,3 +33,4 @@ docs/site/
 # Script-specific output
 vtk_split
 
+*.DS_Store
