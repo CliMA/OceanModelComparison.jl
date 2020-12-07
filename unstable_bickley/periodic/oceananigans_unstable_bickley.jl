@@ -173,9 +173,10 @@ function visualize(name, contours=false)
     return nothing
 end
 
-for Nh in (16, 32, 64, 128, 256,)
-    #name = run(Nh=Nh, advection=CenteredFourthOrder())
-    name = run(Nh=Nh, advection=WENO5())
-    analyze(name)
-    visualize(name)
+for Nh in (16, 32, 64, 128, 256, 512, 1024)
+    for advection in (CenteredSecondOrder(), CenteredFourthOrder(), UpwindBiasedThirdOrder(), UpwindBiasedFifthOrder(), WENO5())
+        name = run(Nh=Nh, advection=advection)
+        analyze(name)
+        visualize(name)
+    end
 end
