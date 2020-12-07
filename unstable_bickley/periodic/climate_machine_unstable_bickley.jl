@@ -45,7 +45,6 @@ function run(; Ne=4, Np=4, array_type=Array, ν=0, output_time_interval=2, stop_
 
     # Physical parameters:
     g = Planet.grav(NonDimensionalParameters())
-    a = f / g # Surface displacement amplitude
 
     # Non-dimensional parameters
     ϵ = 0.1 # Perturbation amplitude
@@ -192,5 +191,26 @@ function visualize(name, contours=false)
     return nothing
 end
 
-name = run(Ne=16, Np=3, safety=0.1)
-visualize(name)
+for DOF in (32, 64, 128, 256, 512)
+    for Np in (2, 3, 4, 5, 6)
+        Ne = round(Int, DOF / (Np+1))
+        name = run(Ne=16, Np=3, safety=0.1)
+        visualize(name)
+    end
+end
+
+for DOF in (512,)
+    for Np in (2, 3, 4, 5, 6)
+        Ne = round(Int, DOF / (Np+1))
+        name = run(Ne=16, Np=3, safety=0.1, ν=1e-4)
+        visualize(name)
+    end
+end
+
+for DOF in (1024,)
+    for Np in (2, 3, 4, 5, 6)
+        Ne = round(Int, DOF / (Np+1))
+        name = run(Ne=16, Np=3, safety=0.1, ν=1e-5)
+        visualize(name)
+    end
+end
