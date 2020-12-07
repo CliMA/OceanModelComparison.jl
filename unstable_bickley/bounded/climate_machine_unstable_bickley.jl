@@ -33,7 +33,7 @@ function run(; Ne=4, Np=4, array_type=Array, ν=0, output_time_interval=2, stop_
     Δx = 4π / (Ne * (Np + 1))
     Δt = safety * Δx / c
 
-    name = @sprintf("climate_machine_unstable_bickley_jet_Ne%d_Np%d_ν%.1e", Ne, Np, ν)
+    name = @sprintf("climate_machine_unstable_bickley_jet_Ne%d_Np%d_ν%.1e_no_rotation", Ne, Np, ν)
 
     ClimateMachine.Settings.array_type = array_type
 
@@ -41,11 +41,11 @@ function run(; Ne=4, Np=4, array_type=Array, ν=0, output_time_interval=2, stop_
 
     domain = RectangularDomain(Ne = (Ne, Ne, 1), Np = Np,
                                x = (-2π, 2π), y = (-2π, 2π), z = (0, 1),
-                               periodicity = (true, false, false))
+                               periodicity = (true, true, false))
 
     # Physical parameters:
     g = Planet.grav(NonDimensionalParameters())
-    f = 1e-3
+    f = 0.0 #1e-3
     a = f / g # Surface displacement amplitude
 
     # Non-dimensional parameters
@@ -194,5 +194,5 @@ function visualize(name, contours=false)
     return nothing
 end
 
-name = run(Ne=8, Np=3, safety=0.1)
+name = run(Ne=16, Np=3, safety=0.1)
 visualize(name)
