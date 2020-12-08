@@ -57,7 +57,7 @@ function run(; Nh = 128,
                                    sim.model.clock.iteration, sim.model.clock.time,
                                    sim.Δt.Δt, maximum(abs, u.data.parent)))
 
-    wizard = TimeStepWizard(cfl=1.0, Δt=1e-2, max_change=1.1, max_Δt=10.0)
+    wizard = TimeStepWizard(cfl=1.0, Δt=1e-4, max_change=1.1, max_Δt=10.0)
 
     simulation = Simulation(model, Δt=wizard, stop_time=stop_time,
                             iteration_interval=10, progress=progress)
@@ -78,7 +78,7 @@ function run(; Nh = 128,
     save_grid = (file, model) -> file["serialized/grid"] = model.grid
 
     simulation.output_writers[:fields] =
-        JLD2OutputWriter(model, merge(model.velocities, model.tracers, (ω=ω,)),
+        JLD2OutputWriter(model, merge(model.velocities, model.tracers, (ω=ω, ∇c²=∇c²)),
                                 schedule = TimeInterval(output_time_interval),
                                 init = save_grid,
                                 prefix = name * "_fields",
@@ -173,8 +173,9 @@ function visualize(name, contours=false)
     return nothing
 end
 
-for Nh in (16, 32, 64, 128, 256, 512, 1024)
-    for advection in (CenteredSecondOrder(), CenteredFourthOrder(), UpwindBiasedThirdOrder(), UpwindBiasedFifthOrder(), WENO5())
+for Nh in (512, 1024)
+    #for advection in (CenteredSecondOrder(), CenteredFourthOrder(), UpwindBiasedThirdOrder(), UpwindBiasedFifthOrder(), WENO5())
+    for advection in (WENO5(),)
         name = run(Nh=Nh, advection=advection)
         analyze(name)
         visualize(name)
