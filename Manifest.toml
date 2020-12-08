@@ -105,7 +105,7 @@ version = "0.9.18"
 
 [[ClimateMachine]]
 deps = ["Adapt", "ArgParse", "CLIMAParameters", "CUDA", "Combinatorics", "Coverage", "Dates", "DelimitedFiles", "Dierckx", "DiffEqBase", "Distributions", "DocStringExtensions", "DoubleFloats", "FFTW", "FileIO", "Formatting", "ForwardDiff", "GaussQuadrature", "JLD2", "KernelAbstractions", "LambertW", "LazyArrays", "LinearAlgebra", "Literate", "Logging", "MPI", "NCDatasets", "NLsolve", "OrderedCollections", "OrdinaryDiffEq", "PackageCompiler", "Pkg", "PrettyTables", "Printf", "Random", "RootSolvers", "SpecialFunctions", "StaticArrays", "StaticNumbers", "Statistics", "WriteVTK"]
-git-tree-sha1 = "3f110c25cb5d6c62b7759d7ae84758300495573f"
+git-tree-sha1 = "d1363482880c3f1bd790f42188ec2db2df4af40c"
 repo-rev = "ocean/glw/eady-instability"
 repo-url = "https://github.com/CliMA/ClimateMachine.jl.git"
 uuid = "777c4786-024f-11e9-21a3-85d5d4106250"

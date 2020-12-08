@@ -21,17 +21,23 @@ using CLIMAParameters: AbstractEarthParameterSet, Planet
 
 struct NonDimensionalParameters <: AbstractEarthParameterSet end
 Planet.grav(::NonDimensionalParameters) = 10
+c = sqrt(Planet.grav(NonDimensionalParameters())) # gravity wave speed for unit depth
 
 include("Bickley.jl")
-
 using .Bickley
 
-function run(; Ne=4, Np=4, array_type=Array, ν=0, output_time_interval=2, stop_time=200,
-             safety=0.1)
+# Low-p assumption:
+effective_node_spacing(Ne, Np, Lx=4π) = Lx / (Ne * (Np + 1))
 
-    c = sqrt(Planet.grav(NonDimensionalParameters())) # gravity wave speed
-    Δx = 4π / (Ne * (Np + 1))
-    Δt = safety * Δx / c
+function run(;
+             Ne = 4,
+             Np = 4,
+             ν = 0,
+             time_step = 0.1 * effective_node_spacing(Ne, Np) / c,
+             array_type = Array,
+             output_time_interval = 2,
+             stabilizing_dissipation = nothing,
+             stop_time = 200)
 
     name = @sprintf("climate_machine_unstable_bickley_jet_Ne%d_Np%d_ν%.1e_no_rotation", Ne, Np, ν)
 
@@ -45,7 +51,6 @@ function run(; Ne=4, Np=4, array_type=Array, ν=0, output_time_interval=2, stop_
 
     # Physical parameters:
     g = Planet.grav(NonDimensionalParameters())
-    a = f / g # Surface displacement amplitude
 
     # Non-dimensional parameters
     ϵ = 0.1 # Perturbation amplitude
@@ -61,11 +66,12 @@ function run(; Ne=4, Np=4, array_type=Array, ν=0, output_time_interval=2, stop_
 
     model = Ocean.HydrostaticBoussinesqSuperModel(
         domain = domain,
-        time_step = Δt,
+        time_step = time_step,
         initial_conditions = initial_conditions,
         parameters = NonDimensionalParameters(),
         turbulence_closure = (νʰ = ν, κʰ = ν, νᶻ = ν, κᶻ = ν),
         rusanov_wave_speeds = (cʰ = sqrt(g * domain.L.z), cᶻ = 1e-2),
+        stabilizing_dissipation = stabilizing_dissipation,
         coriolis = (f₀ = 0, β = 0),
         buoyancy = (αᵀ = 0,),
         boundary_tags = ((0, 0), (1, 1), (1, 2)),
@@ -104,8 +110,8 @@ function run(; Ne=4, Np=4, array_type=Array, ν=0, output_time_interval=2, stop_
 
     model.solver_configuration.timeend = stop_time
 
-    total_steps = ceil(Int, stop_time / Δt)
-    @info @sprintf("Running a simulation of the instability of the Bickley jet (Δt=%.2e, steps=%d)", Δt, total_steps)
+    total_steps = ceil(Int, stop_time / time_step)
+    @info @sprintf("Running a simulation of the instability of the Bickley jet (Δt=%.2e, steps=%d)", time_step, total_steps)
 
     try
         result = ClimateMachine.invoke!(model.solver_configuration;
@@ -192,5 +198,18 @@ function visualize(name, contours=false)
     return nothing
 end
 
-name = run(Ne=8, Np=3, safety=0.1)
+include("StabilizingDissipations.jl")
+using .StabilizingDissipations: StabilizingDissipation
+
+Ne = 8
+Np = 3
+
+time_step = 0.1 * effective_node_spacing(Ne, Np) / c
+
+test_dissipation = StabilizingDissipation(minimum_node_spacing = effective_node_spacing(Ne, Np),
+                                          time_step = time_step,
+                                          Δu = 1e-3,
+                                          Δθ = 1e-3)
+
+name = run(Ne=Ne, Np=Np, stabilizing_dissipation=test_dissipation)
 visualize(name)
