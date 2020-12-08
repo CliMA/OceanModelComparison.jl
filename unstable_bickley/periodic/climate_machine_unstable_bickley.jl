@@ -213,3 +213,29 @@ test_dissipation = StabilizingDissipation(minimum_node_spacing = effective_node_
 
 name = run(Ne=Ne, Np=Np, stabilizing_dissipation=test_dissipation)
 visualize(name)
+
+#=
+for DOF in (32, 64, 128, 256, 512)
+    for Np in (2, 3, 4, 5, 6)
+        Ne = round(Int, DOF / (Np+1))
+        name = run(Ne=16, Np=3, safety=0.1)
+        visualize(name)
+    end
+end
+
+for DOF in (512,)
+    for Np in (2, 3, 4, 5, 6)
+        Ne = round(Int, DOF / (Np+1))
+        name = run(Ne=16, Np=3, safety=0.1, ν=1e-4)
+        visualize(name)
+    end
+end
+
+for DOF in (1024,)
+    for Np in (2, 3, 4, 5, 6)
+        Ne = round(Int, DOF / (Np+1))
+        name = run(Ne=16, Np=3, safety=0.1, ν=1e-5)
+        visualize(name)
+    end
+end
+=#
