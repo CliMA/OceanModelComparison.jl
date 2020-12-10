@@ -1,6 +1,8 @@
 # Unstable Bickley jet
 
 using Printf
+
+ENV["GKSwstype"] = "nul" 
 using Plots
 using Revise
 using CUDA
