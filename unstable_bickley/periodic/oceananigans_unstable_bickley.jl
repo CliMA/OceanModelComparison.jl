@@ -96,7 +96,11 @@ function run(; Nh = 128,
 
     @info "Running a simulation of an unstable Bickley jet with $(Nh)² degrees of freedom..."
 
+    start_time = time_ns()
+
     run!(simulation)
+
+    @info "The simulation ran for $((time_ns() - start_time) * 1e-9) seconds"
 
     return name
 end
@@ -173,11 +177,5 @@ function visualize(name, contours=false)
     return nothing
 end
 
-for Nh in (512, 1024)
-    #for advection in (CenteredSecondOrder(), CenteredFourthOrder(), UpwindBiasedThirdOrder(), UpwindBiasedFifthOrder(), WENO5())
-    for advection in (WENO5(),)
-        name = run(Nh=Nh, advection=advection)
-        analyze(name)
-        visualize(name)
-    end
-end
+name = run(Nh=256, advection=UpwindBiasedFifthOrder())
+visualize(name)
