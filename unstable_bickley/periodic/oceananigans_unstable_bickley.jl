@@ -1,4 +1,6 @@
 using JLD2
+
+ENV["GKSwstype"] = "nul"
 using Plots
 using Printf
 using Statistics
@@ -15,6 +17,8 @@ include("Bickley.jl")
 
 using .Bickley
 
+make_name(Nh, advection) = "oceananigans_unstable_bickley_jet_Nh$(Nh)_$(typeof(advection).name.wrapper)"
+
 function run(; Nh = 128,
                output_time_interval = 2,
                stop_time = 200,
@@ -22,7 +26,7 @@ function run(; Nh = 128,
                ν = 0,
                advection = WENO5())
 
-    name = "oceananigans_unstable_bickley_jet_Nh$(Nh)_$(typeof(advection).name.wrapper)"
+    name = make_name(Nh, advection)
 
     grid = RegularCartesianGrid(size=(Nh, Nh, 1),
                                 x = (-2π, 2π), y=(-2π, 2π), z=(0, 1),
@@ -57,7 +61,7 @@ function run(; Nh = 128,
                                    sim.model.clock.iteration, sim.model.clock.time,
                                    sim.Δt.Δt, maximum(abs, u.data.parent)))
 
-    wizard = TimeStepWizard(cfl=1.0, Δt=1e-4, max_change=1.1, max_Δt=10.0)
+    wizard = TimeStepWizard(cfl=0.5, Δt=1e-4, max_change=1.1, max_Δt=10.0)
 
     simulation = Simulation(model, Δt=wizard, stop_time=stop_time,
                             iteration_interval=10, progress=progress)
@@ -77,13 +81,16 @@ function run(; Nh = 128,
 
     save_grid = (file, model) -> file["serialized/grid"] = model.grid
 
+    #JLD2OutputWriter(model, merge(model.velocities, model.tracers, (ω=ω, ∇c²=∇c²)),
+    #
     simulation.output_writers[:fields] =
-        JLD2OutputWriter(model, merge(model.velocities, model.tracers, (ω=ω, ∇c²=∇c²)),
+        JLD2OutputWriter(model, merge(model.velocities, model.tracers, (ω=ω,)),
                                 schedule = TimeInterval(output_time_interval),
                                 init = save_grid,
                                 prefix = name * "_fields",
                                 force = true)
 
+    #=
     averages = Dict(name => mean(ϕ, dims=(1, 2, 3))
                     for (name, ϕ) in zip(keys(computations), values(computations)))
 
@@ -93,6 +100,7 @@ function run(; Nh = 128,
                          init = save_grid,
                          prefix = name * "_statistics",
                          force = true)
+    =#
 
     @info "Running a simulation of an unstable Bickley jet with $(Nh)² degrees of freedom..."
 
@@ -100,7 +108,10 @@ function run(; Nh = 128,
 
     run!(simulation)
 
-    @info "The simulation ran for $((time_ns() - start_time) * 1e-9) seconds"
+    run_time = (time_ns() - start_time) * 1e-9
+
+    @info "The simulation with Nh = $Nh ran for $run_time seconds"
+    @show cost = run_time / (model.clock.iteration * Nh^2)
 
     return name
 end
@@ -177,5 +188,14 @@ function visualize(name, contours=false)
     return nothing
 end
 
-name = run(Nh=256, advection=UpwindBiasedFifthOrder())
-visualize(name)
+for Nh in (32, 64, 128, 256, 512, 1024, 2048)
+    #name = run(Nh=Nh, arch=GPU(), advection=WENO5())
+    name = make_name(Nh, WENO5())
+    visualize(name)
+end
+
+#=
+for Nh in (32, 64, 128, 256, 512, 1024)
+    name = run(Nh=Nh, arch=CPU(), advection=UpwindBiasedFifthOrder())
+end
+=#
