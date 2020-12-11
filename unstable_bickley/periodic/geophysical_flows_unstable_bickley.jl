@@ -1,13 +1,11 @@
 # Unstable Bickley jet in GeophysicalFlows
 
+ENV["GKSwstype"] = "nul"
 using FourierFlows, Printf, Random, Plots
 
-pyplot()
-
-using PyPlot: pause
- 
 using Random: seed!
 using FFTW: rfft, irfft
+using JLD2
 
 import GeophysicalFlows.TwoDNavierStokes
 import GeophysicalFlows.TwoDNavierStokes: energy, enstrophy
