@@ -1,15 +1,16 @@
 # Unstable Bickley jet in GeophysicalFlows
 
 ENV["GKSwstype"] = "nul"
-using FourierFlows, Printf, Random, Plots
+using Printf
+using Random
+using Plots
 
-using Random: seed!
 using FFTW: rfft, irfft
+using CUDA
 using JLD2
 
-import GeophysicalFlows.TwoDNavierStokes
-import GeophysicalFlows.TwoDNavierStokes: energy, enstrophy
-import GeophysicalFlows: peakedisotropicspectrum
+using FourierFlows
+using GeophysicalFlows: TwoDNavierStokes
 
 include("Bickley.jl")
 
@@ -31,14 +32,16 @@ function run(; dev = CPU(), nx = 128, dt = 1e-2)
     k = 0.5
     ℓ = 0.5
 
+    DeviceArray = dev isa CPU ? Array : CuArray
+
     grid = problem.grid
     x = repeat(reshape(grid.x, grid.nx, 1), 1, grid.ny)
     y = repeat(reshape(grid.y, 1, grid.ny), grid.nx, 1)
 
-    ψᵢ = @. Bickley.Ψ(y) + ϵ * Bickley.ψ̃(x, y, k, ℓ) + 2y / grid.Ly
+    ψᵢ = DeviceArray(@. Bickley.Ψ(y) + ϵ * Bickley.ψ̃(x, y, k, ℓ) + 2y / grid.Ly)
 
     ψᵢh = rfft(ψᵢ)
-    ψᵢh[1, 1] = 0
+    CUDA.@allowscalar ψᵢh[1, 1] = 0
 
     ψᵢ = irfft(ψᵢh, grid.nx)
 
@@ -47,7 +50,7 @@ function run(; dev = CPU(), nx = 128, dt = 1e-2)
     ζᵢ = irfft(problem.vars.zetah, problem.grid.nx)
 
     TwoDNavierStokes.set_zeta!(problem, ζᵢ)
-    TwoDNavierStokes.set_c!(problem, sin.(x/2))
+    TwoDNavierStokes.set_c!(problem, DeviceArray(sin.(x/2)))
 
     # ## Output
 
@@ -126,14 +129,19 @@ function visualize(filename)
     return nothing
 end
 
-cfl = 1
-for nx in (32, 64, 128, 256, 512, 1024)
+cfl = 0.1
+#for nx in (
+
+for nx in (32, 
+           1024, 2048, 4096)
+           #32, 64, 128, 256, 512)
 
     @show dt = cfl * 4π / nx
-    filename, run_time, nsteps = run(nx=nx, dt=dt)
+    filename, run_time, nsteps = run(dev=GPU(), nx=nx, dt=dt)
 
     DOF = nx^2
+    @info "Results for nx = $nx !"
     @show cost = run_time / (nsteps * DOF)
 
-    visualize(filename)
+    #visualize(filename)
 end
