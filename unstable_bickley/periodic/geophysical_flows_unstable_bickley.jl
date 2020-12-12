@@ -50,7 +50,7 @@ function run(; dev = CPU(), nx = 128, dt = 1e-2)
     ζᵢ = irfft(problem.vars.zetah, problem.grid.nx)
 
     TwoDNavierStokes.set_zeta!(problem, ζᵢ)
-    TwoDNavierStokes.set_c!(problem, DeviceArray(sin.(x/2)))
+    TwoDNavierStokes.set_c!(problem, DeviceArray(sin.(y/2)))
 
     # ## Output
 
@@ -111,13 +111,27 @@ function visualize(filename)
 
         @info "Plotting frame $i of $(length(iterations))"
 
+        t = file["snapshots/t/$iter"]
         ζ = file["snapshots/ζ/$iter"]
         c = file["snapshots/c/$iter"]
 
-        ζ_plot = heatmap(x, y, ζ', color=:balance, aspectratio=:equal)
-        c_plot = heatmap(x, y, clamp.(c', -1, 1), color=:thermal, aspectratio=:equal)
+        kwargs = Dict(
+                      :aspectratio => 1,
+                      :linewidth => 0,
+                      :ticks => nothing,
+                      :colorbar => :none,
+                      :clims => (-1, 1),
+                      :xlims => (-2π, 2π),
+                      :ylims => (-2π, 2π),
+                     )
 
-        plot(ζ_plot, c_plot)
+        ζ_plot = heatmap(x, y, clamp.(ζ, -1, 1)'; color=:balance, kwargs...)
+        c_plot = heatmap(x, y, clamp.(c, -1, 1)'; color=:thermal, kwargs...)
+
+        ω_title = @sprintf("ζ at t = %.1f", t)
+        c_title = @sprintf("c at t = %.1f", t)
+
+        plot(ζ_plot, c_plot, title = [ω_title c_title], size=(4000, 2000))
     end
 
     close(file)
@@ -130,10 +144,9 @@ function visualize(filename)
 end
 
 cfl = 0.1
-#for nx in (
-
 for nx in (32, 
-           1024, 2048, 4096)
+           64, 128, 256, 512,
+           1024, 2048)
            #32, 64, 128, 256, 512)
 
     @show dt = cfl * 4π / nx
@@ -143,5 +156,6 @@ for nx in (32,
     @info "Results for nx = $nx !"
     @show cost = run_time / (nsteps * DOF)
 
-    #visualize(filename)
+    filename = "geophysical_flows_unstable_bickley_jet_Nh$nx.jld2"
+    visualize(filename)
 end

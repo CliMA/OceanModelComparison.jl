@@ -69,22 +69,24 @@ function run(; Nh = 128,
     # Output: primitive fields + computations
     u, v, w, c = primitives = merge(model.velocities, model.tracers)
 
-    ω   = ComputedField( ∂x(v) - ∂y(u)      )
-    ω²  = ComputedField( (∂x(v) - ∂y(u))^2  )
-    c²  = ComputedField( c^2                )
+    ζ   = ComputedField( ∂x(v) - ∂y(u)      )
 
+    #=
+    ζ²  = ComputedField( (∂x(v) - ∂y(u))^2  )
+    c²  = ComputedField( c^2                )
     ∇c² = @at (Cell, Cell, Cell) ∂x(c)^2 + ∂y(c)^2
     ∇c² = ComputedField(∇c²)
 
-    computations = (ω=ω, ω²=ω², c²=c², ∇c²=∇c²)
+    computations = (ζ=ζ, ζ²=ζ², c²=c², ∇c²=∇c²)
     outputs = merge(primitives, computations)
+    =#
 
     save_grid = (file, model) -> file["serialized/grid"] = model.grid
 
-    #JLD2OutputWriter(model, merge(model.velocities, model.tracers, (ω=ω, ∇c²=∇c²)),
+    #JLD2OutputWriter(model, merge(model.velocities, model.tracers, (ζ=ζ, ∇c²=∇c²)),
     #
     simulation.output_writers[:fields] =
-        JLD2OutputWriter(model, merge(model.velocities, model.tracers, (ω=ω,)),
+        JLD2OutputWriter(model, merge(model.velocities, model.tracers, (ζ=ζ,)),
                                 schedule = TimeInterval(output_time_interval),
                                 init = save_grid,
                                 prefix = name * "_fields",
@@ -145,7 +147,7 @@ function visualize(name, contours=false)
     grid = fields_file["serialized/grid"]
 
     xu, yu, zu = nodes((Face, Cell, Cell), grid)
-    xω, yω, zω = nodes((Face, Face, Cell), grid)
+    xζ, yζ, zζ = nodes((Face, Face, Cell), grid)
     xc, yc, zc = nodes((Cell, Cell, Cell), grid)
 
     anim = @animate for (i, iteration) in enumerate(iterations)
@@ -153,34 +155,30 @@ function visualize(name, contours=false)
         @info "    Plotting frame $i from iteration $iteration..."
         
         t = fields_file["timeseries/t/$iteration"]
-        ω = fields_file["timeseries/ω/$iteration"][:, :, 1]
+        ζ = fields_file["timeseries/ω/$iteration"][:, :, 1]
         u = fields_file["timeseries/u/$iteration"][:, :, 1]
         c = fields_file["timeseries/c/$iteration"][:, :, 1]
 
-        kwargs = Dict(:xlabel => "x",
-                      :ylabel => "y",
+        kwargs = Dict(
                       :aspectratio => 1,
                       :linewidth => 0,
-                      :colorbar => true,
+                      :colorbar => :none,
+                      :ticks => nothing,
                       :clims => (-1, 1),
                       :xlims => (-grid.Lx/2, grid.Lx/2),
-                      :ylims => (-grid.Ly/2, grid.Ly/2))
+                      :ylims => (-grid.Ly/2, grid.Ly/2)
+                     )
 
         contours && (kwargs[:levels] = range(-1, 1, length=31))
         plotter = contours ? contourf : heatmap
 
-        u_plot = plotter(xu, yu, clamp.(u, -1, 1)'; color = :balance, kwargs...)
-        ω_plot = plotter(xω, yω, clamp.(ω, -1, 1)'; color = :balance, kwargs...)
+        ζ_plot = plotter(xζ, yζ, clamp.(ζ, -1, 1)'; color = :balance, kwargs...)
         c_plot = plotter(xc, yc, clamp.(c, -1, 1)'; color = :thermal, kwargs...)
 
-        u_title = @sprintf("u at t = %.1f", t)
-        ω_title = @sprintf("ω at t = %.1f", t)
+        ζ_title = @sprintf("ζ at t = %.1f", t)
         c_title = @sprintf("c at t = %.1f", t)
 
-        plot(u_plot, ω_plot, c_plot,
-             title = [u_title ω_title c_title],
-             layout = (1, 3),
-             size = (1600, 400))
+        plot(ζ_plot, c_plot, title = [ζ_title c_title], size = (4000, 2000))
     end
 
     gif(anim, name * ".gif", fps = 8)
