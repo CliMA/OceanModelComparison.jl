@@ -38,7 +38,7 @@ function run(; dev = CPU(), nx = 128, dt = 1e-2)
     x = repeat(reshape(grid.x, grid.nx, 1), 1, grid.ny)
     y = repeat(reshape(grid.y, 1, grid.ny), grid.nx, 1)
 
-    ψᵢ = DeviceArray(@. Bickley.Ψ(y) + ϵ * Bickley.ψ̃(x, y, k, ℓ) + 2y / grid.Ly)
+    ψᵢ = DeviceArray(@. Bickley.Ψ(y, grid.Ly) + ϵ * Bickley.ψ̃(x, y, k, ℓ))
 
     ψᵢh = rfft(ψᵢ)
     CUDA.@allowscalar ψᵢh[1, 1] = 0

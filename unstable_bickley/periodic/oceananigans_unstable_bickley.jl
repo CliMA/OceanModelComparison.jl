@@ -51,7 +51,7 @@ function run(; Nh = 128,
     k = 0.5 # Sinusoidal wavenumber
 
     # Total initial conditions
-    uᵢ(x, y, z) = Bickley.U(y) + ϵ * Bickley.ũ(x, y, ℓ, k)
+    uᵢ(x, y, z) = Bickley.U(y, grid.Ly) + ϵ * Bickley.ũ(x, y, ℓ, k)
     vᵢ(x, y, z) = ϵ * Bickley.ṽ(x, y, ℓ, k)
     cᵢ(x, y, z) = Bickley.C(y, grid.Ly)
 
@@ -69,39 +69,18 @@ function run(; Nh = 128,
     # Output: primitive fields + computations
     u, v, w, c = primitives = merge(model.velocities, model.tracers)
 
-    ζ   = ComputedField( ∂x(v) - ∂y(u)      )
-
-    #=
-    ζ²  = ComputedField( (∂x(v) - ∂y(u))^2  )
-    c²  = ComputedField( c^2                )
-    ∇c² = @at (Cell, Cell, Cell) ∂x(c)^2 + ∂y(c)^2
-    ∇c² = ComputedField(∇c²)
-
-    computations = (ζ=ζ, ζ²=ζ², c²=c², ∇c²=∇c²)
-    outputs = merge(primitives, computations)
-    =#
+    ζ   = ComputedField(∂x(v) - ∂y(u))
 
     save_grid = (file, model) -> file["serialized/grid"] = model.grid
 
-    #JLD2OutputWriter(model, merge(model.velocities, model.tracers, (ζ=ζ, ∇c²=∇c²)),
-    #
+    #=
     simulation.output_writers[:fields] =
         JLD2OutputWriter(model, merge(model.velocities, model.tracers, (ζ=ζ,)),
                                 schedule = TimeInterval(output_time_interval),
                                 init = save_grid,
                                 prefix = name * "_fields",
+                                field_slicer = nothing,
                                 force = true)
-
-    #=
-    averages = Dict(name => mean(ϕ, dims=(1, 2, 3))
-                    for (name, ϕ) in zip(keys(computations), values(computations)))
-
-    simulation.output_writers[:averages] =
-        JLD2OutputWriter(model, averages,
-                         schedule = TimeInterval(output_time_interval),
-                         init = save_grid,
-                         prefix = name * "_statistics",
-                         force = true)
     =#
 
     @info "Running a simulation of an unstable Bickley jet with $(Nh)² degrees of freedom..."
@@ -118,33 +97,20 @@ function run(; Nh = 128,
     return name
 end
 
-function analyze(name)
-    @info "Analyzing the results of an unstable Bickley jet simulation..."
+using Oceananigans.Grids: AbstractGrid
+using Oceananigans.Fields: offset_data
+import Oceananigans.Fields: Field
 
-    statistics_file = jldopen(name * "_statistics.jld2")
-
-    iterations = parse.(Int, keys(statistics_file["timeseries/t"]))
-    grid = statistics_file["serialized/grid"]
-
-    ∇c² = [statistics_file["timeseries/∇c²/$iter"][1, 1, 1] for iter in iterations]
-    c²  = [statistics_file["timeseries/c²/$iter"][1, 1, 1] for iter in iterations]
-    t   = [statistics_file["timeseries/t/$iter"][1, 1, 1] for iter in iterations]
-
-    close(statistics_file)
-
-    plot(t, 2π / grid.Ly .* ∇c² ./ c²)
-    savefig(name * ".png")
-
-    return nothing
-end
+Field(loc::Tuple, grid::AbstractGrid, raw_data::Array) = Field(loc, CPU(), grid, nothing, offset_data(raw_data, grid, loc))
+field_from_file(file, loc, name, iter) = Field(loc, file["serialized/grid"], file["timeseries/$name/$iter"])
 
 function visualize(name, contours=false)
     @info "Making a fun movie about an unstable Bickley jet..."
 
-    fields_file = jldopen(name * "_fields.jld2")
+    file = jldopen(name * "_fields.jld2")
 
-    iterations = parse.(Int, keys(fields_file["timeseries/t"]))
-    grid = fields_file["serialized/grid"]
+    iterations = parse.(Int, keys(file["timeseries/t"]))
+    grid = file["serialized/grid"]
 
     xu, yu, zu = nodes((Face, Cell, Cell), grid)
     xζ, yζ, zζ = nodes((Face, Face, Cell), grid)
@@ -154,10 +120,13 @@ function visualize(name, contours=false)
 
         @info "    Plotting frame $i from iteration $iteration..."
         
-        t = fields_file["timeseries/t/$iteration"]
-        ζ = fields_file["timeseries/ω/$iteration"][:, :, 1]
-        u = fields_file["timeseries/u/$iteration"][:, :, 1]
-        c = fields_file["timeseries/c/$iteration"][:, :, 1]
+        t = file["timeseries/t/$iteration"]
+
+        ζ = field_from_file(file, (Face, Face, Cell), :ζ, iteration)
+        c = field_from_file(file, (Cell, Cell, Cell), :c, iteration)
+
+        ζi = interior(ζ)[:, :, 1]
+        ci = interior(c)[:, :, 1]
 
         kwargs = Dict(
                       :aspectratio => 1,
@@ -172,8 +141,8 @@ function visualize(name, contours=false)
         contours && (kwargs[:levels] = range(-1, 1, length=31))
         plotter = contours ? contourf : heatmap
 
-        ζ_plot = plotter(xζ, yζ, clamp.(ζ, -1, 1)'; color = :balance, kwargs...)
-        c_plot = plotter(xc, yc, clamp.(c, -1, 1)'; color = :thermal, kwargs...)
+        ζ_plot = plotter(xζ, yζ, clamp.(ζi, -1, 1)'; color = :balance, kwargs...)
+        c_plot = plotter(xc, yc, clamp.(ci, -1, 1)'; color = :thermal, kwargs...)
 
         ζ_title = @sprintf("ζ at t = %.1f", t)
         c_title = @sprintf("c at t = %.1f", t)
@@ -186,14 +155,8 @@ function visualize(name, contours=false)
     return nothing
 end
 
-for Nh in (32, 64, 128, 256, 512, 1024, 2048)
-    #name = run(Nh=Nh, arch=GPU(), advection=WENO5())
-    name = make_name(Nh, WENO5())
-    visualize(name)
-end
-
-#=
-for Nh in (32, 64, 128, 256, 512, 1024)
+for Nh in (32, 32, 64, 128, 256, 512)
+    name = run(Nh=Nh, arch=CPU(), advection=WENO5())
     name = run(Nh=Nh, arch=CPU(), advection=UpwindBiasedFifthOrder())
+    #visualize(name)
 end
-=#
