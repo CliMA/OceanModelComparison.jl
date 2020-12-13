@@ -4,6 +4,7 @@ ENV["GKSwstype"] = "nul"
 using Plots
 using Printf
 using Statistics
+using CUDA
 
 using Oceananigans
 using Oceananigans.Advection
@@ -56,12 +57,18 @@ function run(; Nh = 128,
     cᵢ(x, y, z) = Bickley.C(y, grid.Ly)
 
     set!(model, u=uᵢ, v=vᵢ, c=cᵢ)
+
+    # Subtract off mean velocity for comparison with GeophysicalFlows
+    DeviceArray = arch isa CPU ? Array : CuArray
+    U = DeviceArray(zeros(1, 1, 1))
+    mean!(U, interior(model.velocities.u))
+    model.velocities.u.data.parent .-= U
     
     progress(sim) = @info(@sprintf("Iter: %d, time: %.1f, Δt: %.3f, max|u|: %.2f",
                                    sim.model.clock.iteration, sim.model.clock.time,
                                    sim.Δt.Δt, maximum(abs, u.data.parent)))
 
-    wizard = TimeStepWizard(cfl=0.5, Δt=1e-4, max_change=1.1, max_Δt=10.0)
+    wizard = TimeStepWizard(cfl=0.1, Δt=1e-4, max_change=1.1, max_Δt=10.0)
 
     simulation = Simulation(model, Δt=wizard, stop_time=stop_time,
                             iteration_interval=10, progress=progress)
@@ -73,7 +80,6 @@ function run(; Nh = 128,
 
     save_grid = (file, model) -> file["serialized/grid"] = model.grid
 
-    #=
     simulation.output_writers[:fields] =
         JLD2OutputWriter(model, merge(model.velocities, model.tracers, (ζ=ζ,)),
                                 schedule = TimeInterval(output_time_interval),
@@ -81,7 +87,6 @@ function run(; Nh = 128,
                                 prefix = name * "_fields",
                                 field_slicer = nothing,
                                 force = true)
-    =#
 
     @info "Running a simulation of an unstable Bickley jet with $(Nh)² degrees of freedom..."
 
@@ -155,8 +160,7 @@ function visualize(name, contours=false)
     return nothing
 end
 
-for Nh in (32, 32, 64, 128, 256, 512)
-    name = run(Nh=Nh, arch=CPU(), advection=WENO5())
-    name = run(Nh=Nh, arch=CPU(), advection=UpwindBiasedFifthOrder())
-    #visualize(name)
+for Nh in (32, 64, 128, 256, 512)
+    name = run(Nh=Nh, arch=GPU(), advection=WENO5())
+    visualize(name)
 end
