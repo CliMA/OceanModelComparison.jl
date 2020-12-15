@@ -1,14 +1,26 @@
 module Analysis
 
+using Oceananigans
 using JLD2
 using Plots
 
-max_abs_tracer(file, iter) = maximum(abs, file["timeseries/c/$iter"])
+using Oceananigans.Grids
+using Oceananigans.Fields: offset_data
+import Oceananigans.Fields: Field
 
-tracer_variance(file, iter) = 1/2 * sum(file["timeseries/c/$iter"].^2)
+Field(loc::Tuple, grid::AbstractGrid, raw_data::Array) = Field(loc, CPU(), grid, nothing, offset_data(raw_data, grid, loc))
+field_from_file(file, loc, name, iter) = Field(loc, file["serialized/grid"], file["timeseries/$name/$iter"])
 
-kinetic_energy(file, iter) = 1/2 * (sum(file["timeseries/u/$iter"].^2) +
-                                    sum(file["timeseries/v/$iter"].^2))
+CellFileField(file, name, iter)  = Field((Cell, Cell, Cell), file["serialized/grid"], file["timeseries/$name/$iter"])
+XFaceFileField(file, name, iter) = Field((Face, Cell, Cell), file["serialized/grid"], file["timeseries/$name/$iter"])
+YFaceFileField(file, name, iter) = Field((Cell, Face, Cell), file["serialized/grid"], file["timeseries/$name/$iter"])
+
+max_abs_tracer(file, iter) = maximum(abs, interior(CellFileField(file, :c, iter)))
+
+tracer_variance(file, iter) = 1/2 * sum(interior(CellFileField(file, :c, iter)).^2)
+
+kinetic_energy(file, iter) = 1/2 * (sum(interior(XFaceFileField(file, :u, iter)).^2) + 
+                                    sum(interior(YFaceFileField(file, :v, iter)).^2))
 
 function oceananigans_statistics(filename)
     file = jldopen(filename)
