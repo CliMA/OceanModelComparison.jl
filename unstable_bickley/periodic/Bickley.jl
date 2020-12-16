@@ -1,8 +1,8 @@
 module Bickley
 
 # The Bickley jet
-Ψ(y) = - tanh(y)
-U(y) = sech(y)^2
+Ψ(y, L) = - tanh(y) + 2y / L
+U(y, L) = sech(y)^2 + 2 / L
 
 # A sinusoidal tracer
 C(y, L) = sin(2π * y / L)

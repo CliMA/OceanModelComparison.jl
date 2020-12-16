@@ -1,6 +1,8 @@
 # Unstable Bickley jet
 
 using Printf
+
+ENV["GKSwstype"] = "nul" 
 using Plots
 using Revise
 using CUDA
@@ -58,7 +60,7 @@ function run(;
     k = 0.5 # Perturbation wavenumber
 
     # Initial conditions: Jet/tracer + perturbations
-    uᵢ(x, y, z) = Bickley.U(y) + ϵ * Bickley.ũ(x, y, ℓ, k)
+    uᵢ(x, y, z) = Bickley.U(y, domain.L.y) + ϵ * Bickley.ũ(x, y, ℓ, k)
     vᵢ(x, y, z) = ϵ * Bickley.ṽ(x, y, ℓ, k)
     θᵢ(x, y, z) = Bickley.C(y, domain.L.y)
 
@@ -79,7 +81,45 @@ function run(;
                                OceanBC(Penetrable(FreeSlip()), Insulating()))
     )
 
-    # We prepare a callback that periodically fetches the horizontal velocity and
+    name = @sprintf("climate_machine_unstable_bickley_jet_Ne%d_Np%d_ν%.1e_no_rotation", Ne, Np, ν)
+
+    ClimateMachine.Settings.array_type = array_type
+
+    # Domain
+
+    domain = RectangularDomain(Ne = (Ne, Ne, 1), Np = Np,
+                               x = (-2π, 2π), y = (-2π, 2π), z = (0, 1),
+                               periodicity = (true, true, false))
+
+    # Physical parameters:
+    g = Planet.grav(NonDimensionalParameters())
+
+    # Non-dimensional parameters
+    ϵ = 0.1 # Perturbation amplitude
+    ℓ = 0.5 # Perturbation width
+    k = 0.5 # Perturbation wavenumber
+
+    # Initial conditions: Jet/tracer + perturbations
+    uᵢ(x, y, z) = Bickley.U(y, domain.L.y) + ϵ * Bickley.ũ(x, y, ℓ, k)
+    vᵢ(x, y, z) = ϵ * Bickley.ṽ(x, y, ℓ, k)
+    θᵢ(x, y, z) = Bickley.C(y, domain.L.y)
+
+    initial_conditions = InitialConditions(u=uᵢ, v=vᵢ, θ=θᵢ)
+
+    model = Ocean.HydrostaticBoussinesqSuperModel(
+        domain = domain,
+        time_step = time_step,
+        initial_conditions = initial_conditions,
+        parameters = NonDimensionalParameters(),
+        turbulence_closure = (νʰ = ν, κʰ = ν, νᶻ = ν, κᶻ = ν),
+        rusanov_wave_speeds = (cʰ = sqrt(g * domain.L.z), cᶻ = 1e-2),
+        stabilizing_dissipation = stabilizing_dissipation,
+        coriolis = (f₀ = 0, β = 0),
+        buoyancy = (αᵀ = 0,),
+        boundary_tags = ((0, 0), (1, 1), (1, 2)),
+        boundary_conditions = (OceanBC(Impenetrable(FreeSlip()), Insulating()),
+                               OceanBC(Penetrable(FreeSlip()), Insulating()))
+    )    # We prepare a callback that periodically fetches the horizontal velocity and
     # tracer concentration for later animation,
 
     writer = JLD2Writer(model, filepath = name * ".jld2", overwrite_existing = true)
